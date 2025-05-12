@@ -73,16 +73,16 @@ def _retry_on_error(func):
 def _load_credentials() -> Credentials:
     """
     Carrega credenciais do Google na seguinte ordem de prioridade:
-      1) st.secrets["GOOGLE_CREDENTIALS"]   (Streamlit Cloud)
+      1) st.secrets["gdrive"]["credentials_json"]   (Streamlit Cloud)
       2) variável de ambiente GOOGLE_CREDENTIALS_JSON (string JSON)
       3) arquivo local CREDENTIALS_FILE
     """
     # 1) st.secrets -------------------------------------------------------------
     try:
         import streamlit as st  # só existe em runtime Streamlit
-        if "GOOGLE_CREDENTIALS" in st.secrets:
-            creds_dict = dict(st.secrets["GOOGLE_CREDENTIALS"])
-            logger.info("Credenciais carregadas de st.secrets['GOOGLE_CREDENTIALS']")
+        if "gdrive" in st.secrets and "credentials_json" in st.secrets["gdrive"]:
+            creds_dict = json.loads(st.secrets["gdrive"]["credentials_json"])
+            logger.info("Credenciais carregadas de st.secrets['gdrive']['credentials_json']")
             return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     except ModuleNotFoundError:
         pass  # não estamos rodando dentro do Streamlit

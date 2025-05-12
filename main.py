@@ -3,6 +3,7 @@
 import streamlit as st
 import os
 import sys
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
@@ -23,7 +24,18 @@ sys.path.append(str(ROOT / "frontend"))  # frontend
 sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
 
 # ────── Carrega variáveis de ambiente ──────
-load_dotenv()
+try:
+    # Tenta carregar do arquivo .env local
+    load_dotenv()
+    
+    # Configura variáveis padrão do Streamlit se não existirem
+    if "DEFAULT_ADMIN_USER" not in st.secrets:
+        st.secrets["DEFAULT_ADMIN_USER"] = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
+    if "DEFAULT_ADMIN_PASS" not in st.secrets:
+        st.secrets["DEFAULT_ADMIN_PASS"] = os.getenv("DEFAULT_ADMIN_PASS", "071959")
+        
+except Exception as e:
+    logger.warning(f"Não foi possível carregar o arquivo .env: {e}")
 
 # ────── Controle de autenticação ──────
 if "autenticado" not in st.session_state:
