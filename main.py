@@ -23,35 +23,57 @@ sys.path.append(str(ROOT))  # backend
 sys.path.append(str(ROOT / "frontend"))  # frontend
 sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
 
-# ────── Carrega variáveis de ambiente ──────
-try:
-    # Tenta carregar do arquivo .env local
-    load_dotenv()
-    
-    # Configura variáveis padrão no session_state se não existirem
-    if "DEFAULT_ADMIN_USER" not in st.session_state:
-        st.session_state["DEFAULT_ADMIN_USER"] = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
-    if "DEFAULT_ADMIN_PASS" not in st.session_state:
-        st.session_state["DEFAULT_ADMIN_PASS"] = os.getenv("DEFAULT_ADMIN_PASS", "071959")
+# ────── Configura variáveis do Google Drive ──────
+def configurar_variaveis_drive():
+    """Configura as variáveis do Google Drive no session_state"""
+    try:
+        # Tenta carregar do arquivo .env local
+        load_dotenv()
         
-    # Configura variáveis do Google Drive
-    if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
-        st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = os.getenv("GDRIVE_DATABASE_FOLDER_ID", "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX")
-    if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
-        st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID", "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5")
+        # Configura variáveis do Google Drive do secrets.toml
+        if "gdrive" in st.secrets:
+            if "database_folder_id" in st.secrets["gdrive"]:
+                st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = st.secrets["gdrive"]["database_folder_id"]
+            if "empresas_folder_id" in st.secrets["gdrive"]:
+                st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = st.secrets["gdrive"]["empresas_folder_id"]
         
-except Exception as e:
-    logger.warning(f"Não foi possível carregar o arquivo .env: {e}")
-    
-    # Configura valores padrão mesmo se o .env falhar
-    if "DEFAULT_ADMIN_USER" not in st.session_state:
-        st.session_state["DEFAULT_ADMIN_USER"] = "Isaque.Z"
-    if "DEFAULT_ADMIN_PASS" not in st.session_state:
-        st.session_state["DEFAULT_ADMIN_PASS"] = "071959"
-    if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
-        st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
-    if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
-        st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
+        # Configura variáveis de usuário padrão do secrets.toml
+        if "DEFAULT_ADMIN_USER" in st.secrets:
+            st.session_state["DEFAULT_ADMIN_USER"] = st.secrets["DEFAULT_ADMIN_USER"]
+        if "DEFAULT_ADMIN_PASS" in st.secrets:
+            st.session_state["DEFAULT_ADMIN_PASS"] = st.secrets["DEFAULT_ADMIN_PASS"]
+            
+        # Configura valores padrão se não encontrados no secrets.toml
+        if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
+            st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
+        if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
+            st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
+        if "DEFAULT_ADMIN_USER" not in st.session_state:
+            st.session_state["DEFAULT_ADMIN_USER"] = "Isaque.Z"
+        if "DEFAULT_ADMIN_PASS" not in st.session_state:
+            st.session_state["DEFAULT_ADMIN_PASS"] = "071959"
+            
+        logger.info("Variáveis do Google Drive configuradas com sucesso")
+        logger.info(f"Database Folder ID: {st.session_state.get('GDRIVE_DATABASE_FOLDER_ID')}")
+        logger.info(f"Empresas Folder ID: {st.session_state.get('GDRIVE_EMPRESAS_FOLDER_ID')}")
+        
+    except Exception as e:
+        logger.warning(f"Erro ao carregar variáveis de ambiente: {e}")
+        
+        # Configura valores padrão mesmo se houver erro
+        if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
+            st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
+        if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
+            st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
+        if "DEFAULT_ADMIN_USER" not in st.session_state:
+            st.session_state["DEFAULT_ADMIN_USER"] = "Isaque.Z"
+        if "DEFAULT_ADMIN_PASS" not in st.session_state:
+            st.session_state["DEFAULT_ADMIN_PASS"] = "071959"
+            
+        logger.info("Variáveis padrão configuradas")
+
+# Configura as variáveis antes de qualquer operação
+configurar_variaveis_drive()
 
 # ────── Controle de autenticação ──────
 if "autenticado" not in st.session_state:
