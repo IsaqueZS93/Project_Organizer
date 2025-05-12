@@ -28,6 +28,29 @@ DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
 _thread_local = threading.local()
 _last_download = None
 
+def _get_drive_folder_id():
+    """Obtém o ID da pasta do Drive do session_state ou do secrets.toml"""
+    try:
+        # Tenta obter do session_state
+        if "GDRIVE_DATABASE_FOLDER_ID" in st.session_state:
+            return st.session_state["GDRIVE_DATABASE_FOLDER_ID"]
+            
+        # Se não estiver no session_state, tenta obter do secrets.toml
+        if "gdrive" in st.secrets and "database_folder_id" in st.secrets["gdrive"]:
+            folder_id = st.secrets["gdrive"]["database_folder_id"]
+            st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = folder_id
+            return folder_id
+            
+        # Se não encontrar em nenhum lugar, usa o valor padrão
+        default_id = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
+        st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = default_id
+        return default_id
+        
+    except Exception as e:
+        logger.error(f"Erro ao obter folder_id: {str(e)}")
+        # Em caso de erro, retorna o valor padrão
+        return "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
+
 def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
     """Autentica um usuário no sistema"""
     conn = None
@@ -62,11 +85,7 @@ def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
 def baixar_banco_do_drive():
     """Baixa o banco de dados do Google Drive"""
     try:
-        # Verifica se as variáveis do Google Drive estão configuradas
-        if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
-            raise Exception("GDRIVE_DATABASE_FOLDER_ID não está configurado no session_state")
-            
-        folder_id = st.session_state["GDRIVE_DATABASE_FOLDER_ID"]
+        folder_id = _get_drive_folder_id()
         logger.info(f"Usando pasta do Drive: {folder_id}")
             
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
@@ -273,11 +292,7 @@ def inicializar_tabelas(conn: sqlite3.Connection):
 def salvar_banco_no_drive(caminho_banco: Path):
     """Salva o banco de dados no Google Drive"""
     try:
-        # Verifica se as variáveis do Google Drive estão configuradas
-        if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
-            raise Exception("GDRIVE_DATABASE_FOLDER_ID não está configurado no session_state")
-            
-        folder_id = st.session_state["GDRIVE_DATABASE_FOLDER_ID"]
+        folder_id = _get_drive_folder_id()
         logger.info(f"Usando pasta do Drive: {folder_id}")
 
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)

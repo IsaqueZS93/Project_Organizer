@@ -27,9 +27,6 @@ sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
 def configurar_variaveis_drive():
     """Configura as variáveis do Google Drive no session_state"""
     try:
-        # Tenta carregar do arquivo .env local
-        load_dotenv()
-        
         # Configura variáveis do Google Drive do secrets.toml
         if "gdrive" in st.secrets:
             if "database_folder_id" in st.secrets["gdrive"]:
@@ -89,6 +86,8 @@ aplicar_estilo_geral()
 
 # Atualiza o banco de dados ao iniciar
 try:
+    # Garante que as variáveis estejam configuradas antes de atualizar o banco
+    configurar_variaveis_drive()
     db.atualizar_banco()
 finally:
     db.fechar_conexao()
