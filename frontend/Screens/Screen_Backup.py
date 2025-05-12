@@ -9,6 +9,7 @@ import sqlite3
 import datetime
 import os
 from tempfile import gettempdir
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa models
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -145,16 +146,19 @@ def criar_backup_banco():
         return None
 
 def exibir_tela_backup():
+    """Exibe a tela de backup de dados"""
+    if not verificar_permissao_admin():
+        st.error("Acesso negado. Esta tela é restrita para administradores.")
+        st.stop()
+        
+    st.title("💾 Backup de Dados")
+    st.write("Esta tela permite realizar backup dos dados do sistema.")
+    
+    # TODO: Implementar funcionalidade de backup
+    st.info("Funcionalidade em desenvolvimento...")
+
     # Aplica tema
     aplicar_estilo_geral()
-
-    # Acesso permitido apenas para admin
-    tipo = st.session_state.get("tipo")
-    if tipo != "admin":
-        st.error("❌ Acesso negado. Apenas administradores podem acessar esta tela.")
-        st.stop()
-
-    st.title("💾 Backup de Dados")
 
     # Data atual para nome dos arquivos
     data_atual = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

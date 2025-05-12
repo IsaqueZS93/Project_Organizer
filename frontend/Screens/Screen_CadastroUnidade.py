@@ -5,6 +5,7 @@ from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
 import datetime
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa models e serviço do Google Drive
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -12,11 +13,12 @@ from Models import model_unidade, model_contrato
 from Services import Service_googledrive as gdrive
 
 def exibir_tela_cadastro_unidade():
+    """Exibe a tela de cadastro de unidades"""
     # Aplica estilo visual
     aplicar_estilo_geral()
 
-    # Restringe acesso
-    if st.session_state.get("tipo") != "admin":
+    # Verifica permissão de administrador
+    if not verificar_permissao_admin():
         st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
 

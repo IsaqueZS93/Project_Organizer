@@ -4,6 +4,7 @@ import streamlit as st
 from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa model e drive
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -14,7 +15,8 @@ def exibir_tela_cadastro_empresa():
     # Estilização e segurança
     aplicar_estilo_geral()
 
-    if st.session_state.get("tipo") != "admin":
+    # Verifica permissão de administrador
+    if not verificar_permissao_admin():
         st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
 

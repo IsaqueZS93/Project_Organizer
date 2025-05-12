@@ -14,10 +14,9 @@ def exibir_tela_servicos_ope():
     # Aplica tema
     aplicar_estilo_geral()
 
-    # Acesso permitido para admin e ope
-    tipo = st.session_state.get("tipo")
-    if tipo not in ("admin", "ope"):
-        st.error("Acesso negado.")
+    # Verifica se o usuário está autenticado
+    if not st.session_state.get("autenticado"):
+        st.error("Acesso negado. Faça login para acessar esta tela.")
         st.stop()
 
     st.title("🔎 Serviços Disponíveis (Execução)")

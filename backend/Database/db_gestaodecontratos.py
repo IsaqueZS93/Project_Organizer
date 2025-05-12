@@ -8,19 +8,55 @@ import sys
 from pathlib import Path
 import threading
 import contextlib
+import logging
 
 # Adiciona o caminho do backend para importar corretamente o módulo do Google Drive
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from Services import Service_googledrive as gdrive
 
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # ─────────────────────────── Variáveis ───────────────────────────
 load_dotenv()
 DB_NAME = "db_gestaodecontratos.db"
 GDRIVE_DATABASE_FOLDER_ID = os.getenv("GDRIVE_DATABASE_FOLDER_ID")
+DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
 
 # Cache de conexão por thread
 _thread_local = threading.local()
 _last_download = None
+
+def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
+    """Autentica um usuário no sistema"""
+    conn = None
+    try:
+        # Baixa o banco do Drive se necessário
+        caminho_banco = baixar_banco_do_drive()
+        conn = sqlite3.connect(str(caminho_banco))
+        cursor = conn.cursor()
+        
+        # Busca usuário
+        cursor.execute(
+            "SELECT tipo, nome FROM usuarios WHERE usuario = ? AND senha = ?",
+            (usuario, senha)
+        )
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            logger.info(f"Usuário autenticado: {usuario} (Tipo: {resultado[0]})")
+            return True, resultado[0], resultado[1]
+        logger.warning(f"Tentativa de login falhou para usuário: {usuario}")
+        return False, "", ""
+        
+    except Exception as e:
+        logger.error(f"Erro ao autenticar usuário: {str(e)}")
+        return False, "", ""
+        
+    finally:
+        if conn:
+            conn.close()
 
 # ─────────────── Baixar banco do Google Drive ───────────────
 def baixar_banco_do_drive() -> Path:
@@ -49,18 +85,24 @@ def baixar_banco_do_drive() -> Path:
 
 # ─────────────── Obter conexão com o banco ───────────────
 def obter_conexao() -> sqlite3.Connection:
-    # Obtém ou cria a conexão para a thread atual
-    if not hasattr(_thread_local, 'conn'):
-        caminho_banco = baixar_banco_do_drive()
-        novo = not caminho_banco.exists()
+    """Obtém uma conexão com o banco de dados"""
+    try:
+        # Obtém ou cria a conexão para a thread atual
+        if not hasattr(_thread_local, 'conn'):
+            caminho_banco = baixar_banco_do_drive()
+            novo = not caminho_banco.exists()
 
-        _thread_local.conn = sqlite3.connect(str(caminho_banco))
-        if novo:
-            inicializar_tabelas(_thread_local.conn)
-            _thread_local.conn.commit()
-            salvar_banco_no_drive(caminho_banco)
-    
-    return _thread_local.conn
+            _thread_local.conn = sqlite3.connect(str(caminho_banco))
+            _thread_local.conn.row_factory = sqlite3.Row
+            if novo:
+                inicializar_tabelas(_thread_local.conn)
+                _thread_local.conn.commit()
+                salvar_banco_no_drive(caminho_banco)
+        
+        return _thread_local.conn
+    except Exception as e:
+        logger.error(f"Erro ao conectar ao banco de dados: {str(e)}")
+        raise
 
 # ─────────────── Fechar conexão ───────────────
 def fechar_conexao():
@@ -109,6 +151,16 @@ def inicializar_tabelas(conn: sqlite3.Connection):
             tipo TEXT CHECK(tipo IN ('admin', 'ope')) NOT NULL
         );
     """)
+
+    # Verifica se já existe algum usuário admin
+    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo = 'admin'")
+    if cursor.fetchone()[0] == 0:
+        # Insere o usuário admin padrão
+        cursor.execute("""
+            INSERT INTO usuarios (nome, usuario, senha, tipo)
+            VALUES (?, ?, ?, ?)
+        """, ("Administrador", "admin", "admin123", "admin"))
+        logger.info("Usuário admin padrão criado")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS funcionarios (

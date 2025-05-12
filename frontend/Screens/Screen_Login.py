@@ -1,109 +1,105 @@
 # frontend/Screens/Screen_Login.py
 
 import streamlit as st
-from dotenv import load_dotenv
 import os
 from pathlib import Path
-import sys
-import sqlite3
-from Styles.theme import aplicar_estilo_geral
-from Models import model_usuario
-from Services import Service_googledrive as gdrive
+from dotenv import load_dotenv
+import logging
+from backend.Database.db_gestaodecontratos import autenticar_usuario
+from backend.Services.Service_googledrive import get_service
 
-# ────── Garante acesso aos módulos backend e estilos ──────
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.append(str(ROOT))  # para backend
-sys.path.append(str(ROOT / "frontend"))  # para Styles
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-from backend.Database.db_gestaodecontratos import obter_conexao
+# Carrega variáveis do .env
+ROOT_DIR = Path(__file__).resolve().parents[2]
+ENV_PATH = ROOT_DIR / ".env"
+load_dotenv(ENV_PATH)
 
-# ────── Carrega variáveis e aplica tema ──────
-load_dotenv()
-aplicar_estilo_geral()
-
+# Constantes para credenciais padrão
 ADMIN_USER = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
 ADMIN_PASS = os.getenv("DEFAULT_ADMIN_PASS", "071959")
 
+def validar_credenciais_admin(usuario: str, senha: str) -> bool:
+    """Valida credenciais do administrador padrão"""
+    logger.info(f"Validando credenciais admin - Usuário: {usuario}")
+    logger.info(f"ADMIN_USER configurado: {ADMIN_USER}")
+    return usuario == ADMIN_USER and senha == ADMIN_PASS
 
-# ────── Função de login ──────
-def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str]:
-    # Primeiro tenta autenticar pelo .env (admin padrão)
-    if usuario == ADMIN_USER and senha == ADMIN_PASS:
-        return True, "admin"
+def login():
+    """Exibe a tela de login e gerencia a autenticação"""
+    if 'autenticado' in st.session_state and st.session_state.autenticado:
+        logger.info(f"Usuário já autenticado: {st.session_state.usuario} (Tipo: {st.session_state.tipo_usuario})")
+        return
 
-    # Senão, consulta o banco de dados
-    conn = obter_conexao()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT tipo FROM usuarios
-        WHERE usuario = ? AND senha = ?
-    """, (usuario, senha))
-    resultado = cursor.fetchone()
-    conn.close()
-
-    if resultado:
-        return True, resultado[0]  # tipo: admin ou ope
-    return False, ""
-
-# ────── Interface de login ──────
-def exibir_login():
-    # Aplica tema
-    aplicar_estilo_geral()
-
-    # Container centralizado para o login
-    col1, col2, col3 = st.columns([1,2,1])
+    st.title("Login")
     
-    with col2:
-
-
-        with st.container():
-            st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            
-            # Título do formulário
-            st.markdown("""
-                <h2 style='text-align: center; color: #333; margin-bottom: 1.5rem;'>
-                    <i class="fas fa-user-circle"></i> Login
-                </h2>
-            """, unsafe_allow_html=True)
-
-            # Campos de login
-            usuario = st.text_input("👤 Usuário", placeholder="Digite seu usuário")
-            senha = st.text_input("🔒 Senha", type="password", placeholder="Digite sua senha")
-
-            # Botão de login
-            if st.button("🚀 Entrar", use_container_width=True):
-                if usuario and senha:
-                    # Verifica credenciais
-                    ok, tipo = autenticar_usuario(usuario, senha)
-                    if ok:
-                        # Atualiza estado da sessão
-                        st.session_state["autenticado"] = True
-                        st.session_state["usuario"] = usuario
-                        st.session_state["tipo"] = tipo
-                        
-                        # Força atualização da página
-                        st.rerun()
-                    else:
-                        st.error("❌ Usuário ou senha inválidos")
-                else:
-                    st.warning("⚠️ Por favor, preencha todos os campos")
-
-            # Rodapé do formulário
-            st.markdown("""
-                <div style='text-align: center; margin-top: 1.5rem; color: #666; font-size: 0.9rem;'>
-                    <p>© 2024 Novaes Engenharia. Todos os direitos reservados.</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Mensagem de ajuda
+    # Container centralizado
+    with st.container():
         st.markdown("""
-            <div style='text-align: center; margin-top: 1rem; color: #666; font-size: 0.9rem;'>
-                <p>Em caso de problemas, entre em contato com o administrador do sistema.</p>
+            <div style='text-align: center; margin-bottom: 2rem;'>
+                <h1 style='color: #1E88E5;'>Gestão de Contratos</h1>
             </div>
         """, unsafe_allow_html=True)
+        
+        # Container do formulário
+        with st.container():
+            st.markdown("""
+                <div style='background-color: white; padding: 2rem; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            """, unsafe_allow_html=True)
+            
+            usuario = st.text_input("Usuário", key="login_usuario")
+            senha = st.text_input("Senha", type="password", key="login_senha")
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("Entrar", use_container_width=True):
+                    if not usuario or not senha:
+                        st.error("Por favor, preencha todos os campos")
+                        return
+                        
+                    logger.info(f"Tentativa de login para usuário: {usuario}")
+                    
+                    # Primeiro tenta autenticar como admin
+                    if validar_credenciais_admin(usuario, senha):
+                        logger.info("Login como administrador bem-sucedido")
+                        st.session_state.autenticado = True
+                        st.session_state.usuario = usuario
+                        st.session_state.tipo_usuario = "admin"
+                        st.session_state.nome = "Administrador"
+                        logger.info(f"Variáveis de sessão configuradas - Usuário: {usuario}, Tipo: admin")
+                        st.rerun()
+                        return
+                    
+                    # Se não for admin, tenta autenticar no banco
+                    sucesso, tipo, nome = autenticar_usuario(usuario, senha)
+                    
+                    if sucesso:
+                        logger.info(f"Login bem-sucedido via banco de dados. Tipo: {tipo}")
+                        st.session_state.autenticado = True
+                        st.session_state.usuario = usuario
+                        st.session_state.tipo_usuario = tipo
+                        st.session_state.nome = nome
+                        logger.info(f"Variáveis de sessão configuradas - Usuário: {usuario}, Tipo: {tipo}")
+                        st.rerun()
+                    else:
+                        logger.warning(f"Falha no login: {nome}")
+                        st.error(nome)
+            
+            with col2:
+                if st.button("Limpar", use_container_width=True):
+                    st.session_state.login_usuario = ""
+                    st.session_state.login_senha = ""
+                    st.rerun()
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
-# ────── Controle de sessão ──────
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
+def logout():
+    """Realiza o logout do usuário"""
+    logger.info("Realizando logout")
+    # Limpa todas as variáveis de sessão
+    for key in list(st.session_state.keys()):
+        logger.info(f"Removendo variável de sessão: {key}")
+        del st.session_state[key]
+    st.rerun()

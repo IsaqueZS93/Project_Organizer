@@ -8,13 +8,14 @@ import sys
 # Importa models
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from Models import model_contrato
+from frontend.Utils.auth import verificar_permissao_admin
 
 def exibir_tela_listar_contratos():
     # Aplica o tema
     aplicar_estilo_geral()
 
     # Proteção admin
-    if st.session_state.get("tipo") != "admin":
+    if not verificar_permissao_admin():
         st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
 

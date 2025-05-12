@@ -4,20 +4,22 @@ import streamlit as st
 from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa model de usuário
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from Models import model_usuario
 
 def exibir_tela_cadastro_usuario():
+    """Exibe a tela de cadastro de usuário"""
     # Aplica estilo visual
     aplicar_estilo_geral()
 
-    # ──── Acesso restrito ao ADMIN ────
-    if st.session_state.get("tipo") != "admin":
-        st.error("Acesso negado. Esta tela é exclusiva para administradores.")
+    # Verifica permissão de administrador
+    if not verificar_permissao_admin():
+        st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
-
+        
     # ──── Título e layout ────
     st.title("👤 Cadastro de Usuário")
     st.markdown("Cadastre um novo usuário no sistema.")

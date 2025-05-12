@@ -7,6 +7,7 @@ import sys
 import datetime
 import os
 from tempfile import gettempdir
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa models
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -165,9 +166,8 @@ def exibir_tela_grid_pastas():
     # Aplica tema
     aplicar_estilo_geral()
 
-    # Acesso permitido apenas para admin
-    tipo = st.session_state.get("tipo")
-    if tipo != "admin":
+    # Verifica permissão de administrador
+    if not verificar_permissao_admin():
         st.error("❌ Acesso negado. Apenas administradores podem acessar esta tela.")
         st.stop()
 
