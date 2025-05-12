@@ -9,6 +9,7 @@ from pathlib import Path
 import threading
 import contextlib
 import logging
+import streamlit as st
 
 # Adiciona o caminho do backend para importar corretamente o módulo do Google Drive
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -59,29 +60,19 @@ def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
             conn.close()
 
 # ─────────────── Baixar banco do Google Drive ───────────────
-def baixar_banco_do_drive() -> Path:
-    global _last_download
-    
-    if not GDRIVE_DATABASE_FOLDER_ID:
-        raise EnvironmentError("⚠️ GDRIVE_DATABASE_FOLDER_ID não está definido no .env")
-
-    local_temp_path = Path(tempfile.gettempdir()) / DB_NAME
-    
-    # Se o arquivo já existe e foi baixado recentemente, retorna o caminho
-    if local_temp_path.exists() and _last_download:
-        return local_temp_path
-
-    file_id = gdrive.get_file_id_by_name(DB_NAME, GDRIVE_DATABASE_FOLDER_ID)
-    
-    if file_id:
-        gdrive.download_file(file_id, str(local_temp_path))
-        print("✅ Banco de dados baixado do Drive.")
-        _last_download = True
-        return local_temp_path
-    else:
-        print("⚠️ Banco não encontrado no Drive. Será criado um novo.")
-        _last_download = True
-        return local_temp_path
+def baixar_banco_do_drive():
+    """Baixa o banco de dados do Google Drive"""
+    try:
+        file_id = gdrive.get_file_id_by_name(DB_NAME, st.session_state.get("GDRIVE_DATABASE_FOLDER_ID"))
+        if not file_id:
+            raise Exception(f"Arquivo {DB_NAME} não encontrado no Drive")
+            
+        caminho_local = DB_PATH
+        gdrive.download_file(file_id, caminho_local)
+        return caminho_local
+    except Exception as e:
+        logger.error(f"Erro ao baixar banco do Drive: {str(e)}")
+        raise
 
 # ─────────────── Obter conexão com o banco ───────────────
 def obter_conexao() -> sqlite3.Connection:

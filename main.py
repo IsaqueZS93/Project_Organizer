@@ -28,14 +28,30 @@ try:
     # Tenta carregar do arquivo .env local
     load_dotenv()
     
-    # Configura variáveis padrão do Streamlit se não existirem
-    if "DEFAULT_ADMIN_USER" not in st.secrets:
-        st.secrets["DEFAULT_ADMIN_USER"] = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
-    if "DEFAULT_ADMIN_PASS" not in st.secrets:
-        st.secrets["DEFAULT_ADMIN_PASS"] = os.getenv("DEFAULT_ADMIN_PASS", "071959")
+    # Configura variáveis padrão no session_state se não existirem
+    if "DEFAULT_ADMIN_USER" not in st.session_state:
+        st.session_state["DEFAULT_ADMIN_USER"] = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
+    if "DEFAULT_ADMIN_PASS" not in st.session_state:
+        st.session_state["DEFAULT_ADMIN_PASS"] = os.getenv("DEFAULT_ADMIN_PASS", "071959")
+        
+    # Configura variáveis do Google Drive
+    if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
+        st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = os.getenv("GDRIVE_DATABASE_FOLDER_ID", "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX")
+    if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
+        st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID", "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5")
         
 except Exception as e:
     logger.warning(f"Não foi possível carregar o arquivo .env: {e}")
+    
+    # Configura valores padrão mesmo se o .env falhar
+    if "DEFAULT_ADMIN_USER" not in st.session_state:
+        st.session_state["DEFAULT_ADMIN_USER"] = "Isaque.Z"
+    if "DEFAULT_ADMIN_PASS" not in st.session_state:
+        st.session_state["DEFAULT_ADMIN_PASS"] = "071959"
+    if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
+        st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
+    if "GDRIVE_EMPRESAS_FOLDER_ID" not in st.session_state:
+        st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
 
 # ────── Controle de autenticação ──────
 if "autenticado" not in st.session_state:
