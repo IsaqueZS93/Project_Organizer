@@ -81,17 +81,39 @@ def _load_credentials() -> Credentials:
     try:
         import streamlit as st  # só existe em runtime Streamlit
         if "gdrive" in st.secrets and "credentials_json" in st.secrets["gdrive"]:
-            creds_dict = json.loads(st.secrets["gdrive"]["credentials_json"])
-            logger.info("Credenciais carregadas de st.secrets['gdrive']['credentials_json']")
-            return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            try:
+                # Tenta carregar o JSON
+                creds_json = st.secrets["gdrive"]["credentials_json"]
+                if isinstance(creds_json, str):
+                    creds_dict = json.loads(creds_json)
+                else:
+                    creds_dict = creds_json
+                
+                # Garante que a chave privada está no formato correto
+                if "private_key" in creds_dict:
+                    private_key = creds_dict["private_key"]
+                    if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
+                        private_key = private_key.replace("\\n", "\n")
+                        creds_dict["private_key"] = private_key
+                
+                logger.info("Credenciais carregadas de st.secrets['gdrive']['credentials_json']")
+                return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao decodificar JSON das credenciais: {e}")
+                raise
     except ModuleNotFoundError:
         pass  # não estamos rodando dentro do Streamlit
 
     # 2) Variável de ambiente ---------------------------------------------------
     env_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if env_json:
-        logger.info("Credenciais carregadas da variável de ambiente GOOGLE_CREDENTIALS_JSON")
-        return Credentials.from_service_account_info(json.loads(env_json), scopes=SCOPES)
+        try:
+            creds_dict = json.loads(env_json)
+            logger.info("Credenciais carregadas da variável de ambiente GOOGLE_CREDENTIALS_JSON")
+            return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        except json.JSONDecodeError as e:
+            logger.error(f"Erro ao decodificar JSON das credenciais da variável de ambiente: {e}")
+            raise
 
     # 3) Arquivo local ----------------------------------------------------------
     if CREDENTIALS_FILE.exists():

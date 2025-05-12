@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────── Variáveis ───────────────────────────
 load_dotenv()
 DB_NAME = "db_gestaodecontratos.db"
-GDRIVE_DATABASE_FOLDER_ID = os.getenv("GDRIVE_DATABASE_FOLDER_ID")
 DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
 
 # Cache de conexão por thread
@@ -63,12 +62,17 @@ def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
 def baixar_banco_do_drive():
     """Baixa o banco de dados do Google Drive"""
     try:
-        file_id = gdrive.get_file_id_by_name(DB_NAME, st.session_state.get("GDRIVE_DATABASE_FOLDER_ID"))
+        folder_id = st.session_state.get("GDRIVE_DATABASE_FOLDER_ID")
+        if not folder_id:
+            raise Exception("GDRIVE_DATABASE_FOLDER_ID não está configurado")
+            
+        file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
         if not file_id:
             raise Exception(f"Arquivo {DB_NAME} não encontrado no Drive")
             
         caminho_local = DB_PATH
         gdrive.download_file(file_id, caminho_local)
+        logger.info(f"Banco de dados baixado com sucesso: {caminho_local}")
         return caminho_local
     except Exception as e:
         logger.error(f"Erro ao baixar banco do Drive: {str(e)}")
@@ -264,17 +268,22 @@ def inicializar_tabelas(conn: sqlite3.Connection):
 
 # ─────────────── Enviar/atualizar banco no Drive ───────────────
 def salvar_banco_no_drive(caminho_banco: Path):
-    if not GDRIVE_DATABASE_FOLDER_ID:
-        print("⚠️ GDRIVE_DATABASE_FOLDER_ID não definido no .env.")
-        return
+    """Salva o banco de dados no Google Drive"""
+    try:
+        folder_id = st.session_state.get("GDRIVE_DATABASE_FOLDER_ID")
+        if not folder_id:
+            raise Exception("GDRIVE_DATABASE_FOLDER_ID não está configurado")
 
-    file_id = gdrive.get_file_id_by_name(DB_NAME, GDRIVE_DATABASE_FOLDER_ID)
-    if file_id:
-        gdrive.update_file(file_id, str(caminho_banco))
-        print("🔁 Banco atualizado no Google Drive.")
-    else:
-        gdrive.upload_file(str(caminho_banco), GDRIVE_DATABASE_FOLDER_ID)
-        print("☁️ Banco enviado ao Google Drive.")
+        file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
+        if file_id:
+            gdrive.update_file(file_id, str(caminho_banco))
+            logger.info("Banco atualizado no Google Drive")
+        else:
+            gdrive.upload_file(str(caminho_banco), folder_id)
+            logger.info("Banco enviado ao Google Drive")
+    except Exception as e:
+        logger.error(f"Erro ao salvar banco no Drive: {str(e)}")
+        raise
 
 # ─────────────── Atualizar banco de dados ───────────────
 def atualizar_banco():
