@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 def criar_empresa(nome: str, cnpj: str, cod_empresa: str) -> bool:
     """Cria uma nova empresa no banco de dados e no Google Drive"""
     try:
-        # Obtém o ID da pasta de empresas do secrets
-        empresas_folder_id = st.secrets.get("empresas_folder_id")
+        # Obtém o ID da pasta de empresas do session_state
+        empresas_folder_id = st.session_state.get("GDRIVE_EMPRESAS_FOLDER_ID")
         if not empresas_folder_id:
-            logger.error("empresas_folder_id não definida no secrets.toml")
+            logger.error("GDRIVE_EMPRESAS_FOLDER_ID não definida no session_state")
             return False
 
         with obter_conexao() as conn:
