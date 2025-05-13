@@ -7,6 +7,7 @@ import sys
 import os
 import logging
 from tempfile import gettempdir
+import streamlit as st
 
 # Adiciona o caminho para importar banco e serviço do Drive
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -17,10 +18,8 @@ from Services import Service_googledrive as gdrive
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Pasta raiz do Drive para empresas (criada manualmente ou previamente)
-from dotenv import load_dotenv
-load_dotenv()
-GDRIVE_EMPRESAS_FOLDER_ID = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID")
+# Pasta raiz do Drive para empresas (do secrets.toml)
+GDRIVE_EMPRESAS_FOLDER_ID = st.secrets["empresas_folder_id"]
 
 # ───────────────── CRUD de Empresas com Drive ─────────────────
 
@@ -44,7 +43,7 @@ def criar_empresa(nome: str, cnpj: str, cod_empresa: str) -> bool:
 
             # Verifica se a pasta raiz do Drive está configurada
             if not GDRIVE_EMPRESAS_FOLDER_ID:
-                logger.error("GDRIVE_EMPRESAS_FOLDER_ID não definida no .env")
+                logger.error("empresas_folder_id não definida no secrets.toml")
                 return False
 
             # Cria a pasta no Drive
