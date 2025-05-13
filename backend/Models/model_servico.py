@@ -490,15 +490,35 @@ def download_arquivo_servico(arquivo_id: int) -> Optional[bytes]:
         temp_file = Path(gettempdir()) / nome_arquivo
         
         # Baixa o arquivo do Drive para o arquivo temporário
-        if not gdrive.download_file(drive_file_id, str(temp_file)):
+        download_sucesso = gdrive.download_file(drive_file_id, str(temp_file))
+        if not download_sucesso:
             logger.error("Erro ao baixar arquivo do Drive")
+            return None
+            
+        # Verifica se o arquivo foi criado e tem tamanho
+        if not temp_file.exists():
+            logger.error("Arquivo temporário não foi criado")
+            return None
+            
+        tamanho_arquivo = temp_file.stat().st_size
+        logger.info(f"Arquivo temporário criado com sucesso: {tamanho_arquivo} bytes")
+        
+        if tamanho_arquivo == 0:
+            logger.error("Arquivo temporário está vazio")
             return None
             
         # Lê o conteúdo do arquivo temporário
         try:
             arquivo_bytes = temp_file.read_bytes()
-            logger.info(f"Arquivo baixado com sucesso: {len(arquivo_bytes)} bytes")
+            logger.info(f"Arquivo lido com sucesso: {len(arquivo_bytes)} bytes")
+            
+            # Verifica se os bytes foram lidos corretamente
+            if len(arquivo_bytes) == 0:
+                logger.error("Nenhum byte foi lido do arquivo")
+                return None
+                
             return arquivo_bytes
+            
         except Exception as e:
             logger.error(f"Erro ao ler arquivo temporário: {e}")
             return None

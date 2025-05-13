@@ -239,23 +239,50 @@ def list_files_in_folder(folder_id: str) -> List[dict]:
 
 
 @_retry_on_error
-def download_file(file_id: str, dest_path: str):
+def download_file(file_id: str, dest_path: str) -> bool:
     """Baixa um arquivo do Drive para `dest_path`."""
     try:
         service = get_service()
         logger.info(f"Download de arquivo: {file_id}")
+        
+        # Verifica se o arquivo existe
+        try:
+            file = service.files().get(fileId=file_id, fields="id, name, size").execute()
+            logger.info(f"Arquivo encontrado: {file.get('name')} ({file.get('size')} bytes)")
+        except HttpError as e:
+            logger.error(f"Arquivo não encontrado no Drive: {e}")
+            return False
+            
         request = service.files().get_media(fileId=file_id)
-
+        
+        # Garante que o diretório de destino existe
+        dest_dir = Path(dest_path).parent
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        
         with io.FileIO(dest_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
             done = False
             while not done:
-                _, done = downloader.next_chunk()
-        logger.info(f"Arquivo baixado em: {dest_path}")
+                status, done = downloader.next_chunk()
+                if status:
+                    logger.info(f"Download progress: {int(status.progress() * 100)}%")
+                    
+        # Verifica se o arquivo foi criado e tem tamanho
+        if not Path(dest_path).exists():
+            logger.error("Arquivo não foi criado após o download")
+            return False
+            
+        tamanho = Path(dest_path).stat().st_size
+        if tamanho == 0:
+            logger.error("Arquivo foi criado mas está vazio")
+            return False
+            
+        logger.info(f"Arquivo baixado com sucesso: {dest_path} ({tamanho} bytes)")
+        return True
 
     except Exception as e:
         logger.error(f"Erro ao baixar arquivo: {e}")
-        raise
+        return False
 
 
 @_retry_on_error

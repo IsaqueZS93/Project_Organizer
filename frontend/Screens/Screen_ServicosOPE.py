@@ -149,26 +149,49 @@ def exibir_tela_servicos_ope():
                     arquivos = [a for a in arquivos if a[3] and datetime.datetime.strptime(a[3], "%Y-%m-%d %H:%M:%S").date() == filtro_data]
 
                 if arquivos:
-                    for a in arquivos:
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.markdown(f"**{a[1]}** ({a[2]})")
-                            st.markdown(f"*{a[4] or 'Sem descrição'}*")
-                            st.markdown(f"Upload: {a[3]}")
-                        with col2:
-                            if st.button("📥 Download", key=f"down_{a[0]}"):
-                                with st.spinner("Baixando arquivo..."):
-                                    arquivo_bytes = model_servico.download_arquivo_servico(a[0])
-                                    if arquivo_bytes:
-                                        st.download_button(
-                                            label="Baixar Arquivo",
-                                            data=arquivo_bytes,
-                                            file_name=a[1],
-                                            mime=a[2],
-                                            key=f"download_{a[0]}"
-                                        )
-                                    else:
-                                        st.error("Erro ao baixar arquivo. Tente novamente.")
+                    st.subheader("📁 Arquivos do Serviço")
+                    
+                    # Grid de arquivos
+                    cols = st.columns(4)
+                    for i, arquivo in enumerate(arquivos):
+                        col = cols[i % 4]
+                        with col:
+                            # Container para cada arquivo
+                            with st.container():
+                                # Ícone baseado no tipo de arquivo
+                                if arquivo[2].startswith('image/'):
+                                    st.image("https://drive.google.com/uc?export=view&id=" + arquivo[5], use_column_width=True)
+                                else:
+                                    st.write(get_file_icon(arquivo[2]))
+                                
+                                # Nome do arquivo
+                                st.write(arquivo[1])
+                                
+                                # Data de upload
+                                st.write(f"📅 {arquivo[3]}")
+                                
+                                # Descrição (se houver)
+                                if arquivo[4]:
+                                    st.write(f"📝 {arquivo[4]}")
+                                
+                                # Botão de download
+                                if st.button("⬇️ Download", key=f"download_{arquivo[0]}"):
+                                    with st.spinner("Baixando arquivo..."):
+                                        try:
+                                            arquivo_bytes = model_servico.download_arquivo_servico(arquivo[0])
+                                            if arquivo_bytes:
+                                                st.download_button(
+                                                    label="Clique para salvar",
+                                                    data=arquivo_bytes,
+                                                    file_name=arquivo[1],
+                                                    mime=arquivo[2],
+                                                    key=f"save_{arquivo[0]}"
+                                                )
+                                            else:
+                                                st.error("❌ Erro ao baixar arquivo. Tente novamente.")
+                                        except Exception as e:
+                                            st.error(f"❌ Erro ao baixar arquivo: {str(e)}")
+                                            st.error("Tente novamente.")
                 else:
                     st.info("Nenhum arquivo encontrado com os filtros selecionados.")
 
