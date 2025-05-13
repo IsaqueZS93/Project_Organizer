@@ -42,7 +42,10 @@ def exibir_tela_listar_usuarios():
 
                 # Mostra senha apenas para usuários autorizados ou para o próprio usuário
                 if verificar_permissao_edicao() or u[2] == usuario_atual:
-                    st.markdown(f"**Senha:** {u[5]}")
+                    # Busca dados completos do usuário para obter a senha
+                    dados_completos = model_usuario.buscar_usuario_por_id(u[0])
+                    if dados_completos:
+                        st.markdown(f"**Senha:** {dados_completos[5]}")
 
                 col1, col2 = st.columns([1, 1])
 
