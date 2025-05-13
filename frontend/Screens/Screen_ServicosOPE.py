@@ -96,16 +96,21 @@ def exibir_tela_servicos_ope():
                 )
                 
                 if arquivos:
-                    descricao = st.text_input("Descrição para todos os arquivos", key=f"desc_{s[0]}")
+                    # Campo de descrição opcional
+                    descricao = st.text_input("Descrição para todos os arquivos (opcional)", key=f"desc_{s[0]}")
+                    
                     if st.button("Enviar Todos", key=f"send_{s[0]}"):
                         sucesso_total = True
                         for arquivo in arquivos:
+                            # Trata a descrição para evitar valores nulos
+                            descricao_arquivo = descricao.strip() if descricao else None
+                            
                             sucesso = model_servico.upload_arquivo_servico(
                                 cod_servico=s[0],
                                 arquivo=arquivo.getvalue(),
                                 nome_arquivo=arquivo.name,
                                 tipo_arquivo=arquivo.type,
-                                descricao=descricao
+                                descricao=descricao_arquivo
                             )
                             if not sucesso:
                                 sucesso_total = False

@@ -290,9 +290,10 @@ def deletar_servico(cod_servico: str) -> bool:
 
 def upload_arquivo_servico(cod_servico: str, arquivo: bytes, nome_arquivo: str, tipo_arquivo: str, descricao: str = None) -> bool:
     try:
-        print(f"📤 Iniciando upload do arquivo: {nome_arquivo}")
-        print(f"   - Serviço: {cod_servico}")
-        print(f"   - Tipo: {tipo_arquivo}")
+        logger.info(f"Iniciando upload do arquivo: {nome_arquivo}")
+        logger.info(f"   - Serviço: {cod_servico}")
+        logger.info(f"   - Tipo: {tipo_arquivo}")
+        logger.info(f"   - Descrição: {descricao or 'Sem descrição'}")
 
         # Busca o ID da pasta do serviço
         with db.obter_conexao() as conn:
@@ -300,24 +301,24 @@ def upload_arquivo_servico(cod_servico: str, arquivo: bytes, nome_arquivo: str, 
             cursor.execute("SELECT pasta_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
             row = cursor.fetchone()
             if not row or not row[0]:
-                print("❌ Pasta do serviço não encontrada no banco")
+                logger.error("Pasta do serviço não encontrada no banco")
                 return False
             pasta_servico_id = row[0]
 
-        print(f"✅ Pasta do serviço encontrada")
+        logger.info(f"Pasta do serviço encontrada")
 
         # 📁 Verificar ou criar pasta "Arquivos"
         pasta_arquivos = "Arquivos"
         pasta_arquivos_id = gdrive.get_file_id_by_name(pasta_arquivos, pasta_servico_id)
         if not pasta_arquivos_id:
-            print(f"📁 Criando pasta de arquivos: {pasta_arquivos}")
+            logger.info(f"Criando pasta de arquivos: {pasta_arquivos}")
             pasta_arquivos_id = gdrive.ensure_folder(pasta_arquivos, pasta_servico_id)
             if not pasta_arquivos_id:
-                print("❌ Erro ao criar pasta de arquivos")
+                logger.error("Erro ao criar pasta de arquivos")
                 return False
-            print(f"✅ Pasta de arquivos criada: {pasta_arquivos_id}")
+            logger.info(f"Pasta de arquivos criada: {pasta_arquivos_id}")
         else:
-            print(f"✅ Pasta de arquivos encontrada: {pasta_arquivos_id}")
+            logger.info(f"Pasta de arquivos encontrada: {pasta_arquivos_id}")
 
         # 🧠 Gerar nome único para o novo arquivo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -338,10 +339,10 @@ def upload_arquivo_servico(cod_servico: str, arquivo: bytes, nome_arquivo: str, 
             if ultimo_arquivo else 1
         )
         novo_nome = f"{cod_servico}_{timestamp}_{novo_numero:03d}.{extensao}"
-        print(f"📝 Novo nome do arquivo: {novo_nome}")
+        logger.info(f"Novo nome do arquivo: {novo_nome}")
 
         # ☁️ Upload do arquivo
-        print(f"📤 Enviando arquivo: {novo_nome}")
+        logger.info(f"Enviando arquivo: {novo_nome}")
         # Criar um arquivo temporário
         temp_file = Path(gettempdir()) / novo_nome
         temp_file.write_bytes(arquivo)
@@ -353,26 +354,45 @@ def upload_arquivo_servico(cod_servico: str, arquivo: bytes, nome_arquivo: str, 
         temp_file.unlink()
         
         if not drive_file_id:
-            print("❌ Erro ao fazer upload do arquivo")
+            logger.error("Erro ao fazer upload do arquivo")
             return False
-        print(f"✅ Arquivo enviado com sucesso: {drive_file_id}")
+        logger.info(f"Arquivo enviado com sucesso: {drive_file_id}")
 
-        # 💾 Inserir registro no banco
-        with db.obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO arquivos_servico (cod_servico, nome_arquivo, tipo_arquivo, drive_file_id, data_upload, descricao)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                cod_servico, novo_nome, tipo_arquivo, drive_file_id,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), descricao
-            ))
-            print("✅ Registro inserido no banco com sucesso")
-
-        return True
+        try:
+            # Inicia uma transação
+            with db.obter_conexao() as conn:
+                cursor = conn.cursor()
+                conn.execute("BEGIN TRANSACTION")
+                
+                # 💾 Inserir registro no banco
+                cursor.execute("""
+                    INSERT INTO arquivos_servico (cod_servico, nome_arquivo, tipo_arquivo, drive_file_id, data_upload, descricao)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    cod_servico, novo_nome, tipo_arquivo, drive_file_id,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"), descricao
+                ))
+                
+                # Força o commit
+                conn.commit()
+                logger.info("Registro inserido no banco com sucesso")
+                
+                # Verifica se o arquivo foi realmente inserido
+                cursor.execute("SELECT id FROM arquivos_servico WHERE nome_arquivo = ?", (novo_nome,))
+                if not cursor.fetchone():
+                    logger.error("Erro: Arquivo não foi inserido no banco")
+                    conn.rollback()
+                    return False
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"Erro durante a transação: {e}")
+            conn.rollback()
+            return False
 
     except Exception as e:
-        print(f"❌ Erro ao fazer upload do arquivo: {e}")
+        logger.error(f"Erro ao fazer upload do arquivo: {e}")
         return False
 
 def listar_arquivos_servico(cod_servico: str) -> List[Tuple]:
