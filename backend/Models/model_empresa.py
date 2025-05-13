@@ -18,14 +18,17 @@ from Services import Service_googledrive as gdrive
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Pasta raiz do Drive para empresas (do secrets.toml)
-GDRIVE_EMPRESAS_FOLDER_ID = st.secrets["empresas_folder_id"]
-
 # ───────────────── CRUD de Empresas com Drive ─────────────────
 
 def criar_empresa(nome: str, cnpj: str, cod_empresa: str) -> bool:
     """Cria uma nova empresa no banco de dados e no Google Drive"""
     try:
+        # Obtém o ID da pasta de empresas do secrets
+        empresas_folder_id = st.secrets.get("empresas_folder_id")
+        if not empresas_folder_id:
+            logger.error("empresas_folder_id não definida no secrets.toml")
+            return False
+
         with obter_conexao() as conn:
             cursor = conn.cursor()
             
@@ -41,13 +44,8 @@ def criar_empresa(nome: str, cnpj: str, cod_empresa: str) -> bool:
                 logger.warning(f"Tentativa de criar empresa com código duplicado: {cod_empresa}")
                 return False
 
-            # Verifica se a pasta raiz do Drive está configurada
-            if not GDRIVE_EMPRESAS_FOLDER_ID:
-                logger.error("empresas_folder_id não definida no secrets.toml")
-                return False
-
             # Cria a pasta no Drive
-            pasta_empresa_id = gdrive.ensure_folder(nome, GDRIVE_EMPRESAS_FOLDER_ID)
+            pasta_empresa_id = gdrive.ensure_folder(nome, empresas_folder_id)
             if not pasta_empresa_id:
                 logger.error("Erro ao criar pasta da empresa no Drive")
                 return False
