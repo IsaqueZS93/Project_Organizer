@@ -119,6 +119,20 @@ def login():
                     st.error(nome)
             
             st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Adiciona os direitos reservados
+            st.markdown("""
+                <div style='
+                    text-align: center;
+                    margin-top: 2rem;
+                    padding: 1rem;
+                    color: #666;
+                    font-size: 0.9rem;
+                '>
+                    <p>© 2024 Novaes Engenharia. Todos os direitos reservados.</p>
+                    <p style='font-size: 0.8rem; margin-top: 0.5rem;'>Desenvolvido com ❤️ pela equipe de TI</p>
+                </div>
+            """, unsafe_allow_html=True)
 
 def logout():
     """Realiza o logout do usuário"""
