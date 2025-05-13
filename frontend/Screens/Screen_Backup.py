@@ -10,6 +10,7 @@ import datetime
 import os
 from tempfile import gettempdir
 from frontend.Utils.auth import verificar_permissao_admin
+import logging
 
 # Importa models
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -17,13 +18,15 @@ from Models import model_empresa, model_contrato, model_unidade, model_servico, 
 from Database import db_gestaodecontratos as db
 from Services import Service_googledrive as gdrive
 
+logger = logging.getLogger(__name__)
+
 def obter_banco_temp():
     """Baixa o banco de dados do Google Drive para um arquivo temporário"""
     try:
         # ID do arquivo do banco no Google Drive
-        banco_id = os.getenv("GDRIVE_DATABASE_FOLDER_ID")
+        banco_id = st.session_state.get("GDRIVE_DATABASE_FOLDER_ID")
         if not banco_id:
-            st.error("❌ ID do banco de dados não configurado no Google Drive")
+            st.error("❌ ID do banco de dados não encontrado. Por favor, faça login novamente.")
             return None
 
         # Lista arquivos na pasta
@@ -48,13 +51,18 @@ def obter_banco_temp():
         
         # Baixa o banco do Google Drive
         if gdrive.download_file(banco_file['id'], str(temp_file)):
-            return temp_file
+            # Verifica se o arquivo foi baixado corretamente
+            if temp_file.exists() and temp_file.stat().st_size > 0:
+                return temp_file
+            else:
+                st.error("❌ Erro: Arquivo baixado está vazio ou não existe")
+                return None
         else:
             st.error("❌ Erro ao baixar banco de dados do Google Drive")
             return None
             
     except Exception as e:
-        st.error(f"Erro ao obter banco de dados: {e}")
+        st.error(f"❌ Erro ao obter banco de dados: {str(e)}")
         return None
 
 def exportar_dados_json():
@@ -130,19 +138,34 @@ def criar_backup_banco():
         if not temp_file:
             return None
 
+        # Verifica se o arquivo existe e tem conteúdo
+        if not temp_file.exists():
+            st.error("❌ Erro: Arquivo temporário não foi criado")
+            return None
+            
+        if temp_file.stat().st_size == 0:
+            st.error("❌ Erro: Arquivo temporário está vazio")
+            return None
+
         # Lê o conteúdo do banco
         with open(temp_file, 'rb') as f:
             db_content = f.read()
         
         # Remove o arquivo temporário
-        temp_file.unlink()
+        try:
+            temp_file.unlink()
+        except Exception as e:
+            logger.warning(f"Erro ao remover arquivo temporário: {e}")
         
         return db_content
             
     except Exception as e:
-        st.error(f"Erro ao criar backup: {e}")
+        st.error(f"❌ Erro ao criar backup: {str(e)}")
         if temp_file and temp_file.exists():
-            temp_file.unlink()
+            try:
+                temp_file.unlink()
+            except:
+                pass
         return None
 
 def exibir_tela_backup():
@@ -154,8 +177,10 @@ def exibir_tela_backup():
     st.title("💾 Backup de Dados")
     st.write("Esta tela permite realizar backup dos dados do sistema.")
     
-    # TODO: Implementar funcionalidade de backup
-    st.info("Funcionalidade em desenvolvimento...")
+    # Garante que as variáveis do Google Drive estejam configuradas
+    if "GDRIVE_DATABASE_FOLDER_ID" not in st.session_state:
+        st.error("❌ Configurações do Google Drive não encontradas. Por favor, faça login novamente.")
+        st.stop()
 
     # Aplica tema
     aplicar_estilo_geral()
