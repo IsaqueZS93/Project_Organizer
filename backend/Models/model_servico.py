@@ -5,8 +5,10 @@ from typing import List, Optional, Tuple
 from pathlib import Path
 import sys
 import os
+import logging
 from datetime import datetime
 from tempfile import gettempdir
+import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from Database import db_gestaodecontratos as db
@@ -17,60 +19,71 @@ from Models.model_unidade import obter_pasta_contrato
 load_dotenv()
 EMPRESAS_DRIVE_FOLDER_ID = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID")
 
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ──────────────── Funções Auxiliares ────────────────
 
 def gerar_codigo_servico() -> str:
     """Gera um código único para o serviço no formato: OS_AAAAMMDD_XXX"""
-    conn = db.obter_conexao()
-    cursor = conn.cursor()
-    
-    # Obtém a data atual
-    data_atual = datetime.now().strftime("%Y%m%d")
-    
-    # Busca o último código do dia
-    cursor.execute("""
-        SELECT cod_servico FROM servicos 
-        WHERE cod_servico LIKE ? 
-        ORDER BY cod_servico DESC LIMIT 1
-    """, (f"OS_{data_atual}_%",))
-    
-    ultimo_codigo = cursor.fetchone()
-    
-    if ultimo_codigo:
-        # Extrai o número sequencial e incrementa
-        ultimo_numero = int(ultimo_codigo[0].split('_')[-1])
-        novo_numero = ultimo_numero + 1
-    else:
-        # Se não houver código hoje, começa do 1
-        novo_numero = 1
-    
-    # Formata o novo código com 3 dígitos
-    return f"OS_{data_atual}_{novo_numero:03d}"
+    try:
+        with db.obter_conexao() as conn:
+            cursor = conn.cursor()
+            
+            # Obtém a data atual
+            data_atual = datetime.now().strftime("%Y%m%d")
+            
+            # Busca o último código do dia
+            cursor.execute("""
+                SELECT cod_servico FROM servicos 
+                WHERE cod_servico LIKE ? 
+                ORDER BY cod_servico DESC LIMIT 1
+            """, (f"OS_{data_atual}_%",))
+            
+            ultimo_codigo = cursor.fetchone()
+            
+            if ultimo_codigo:
+                # Extrai o número sequencial e incrementa
+                ultimo_numero = int(ultimo_codigo[0].split('_')[-1])
+                novo_numero = ultimo_numero + 1
+            else:
+                # Se não houver código hoje, começa do 1
+                novo_numero = 1
+            
+            # Formata o novo código com 3 dígitos
+            return f"OS_{data_atual}_{novo_numero:03d}"
+    except Exception as e:
+        logger.error(f"Erro ao gerar código do serviço: {e}")
+        return None
 
 # ──────────────── CRUD de Serviços com Drive ────────────────
 
 def obter_pasta_unidade(cod_unidade: str, nome_unidade: str, numero_contrato: str, nome_empresa: str) -> Optional[str]:
-    pasta_contrato = f"{numero_contrato}_{nome_empresa}"
-    pasta_unidade = f"{nome_unidade}_{cod_unidade}"
-    
-    print(f"🔍 Buscando pasta do contrato: {pasta_contrato}")
-    pasta_contrato_id = gdrive.get_file_id_by_name(pasta_contrato, EMPRESAS_DRIVE_FOLDER_ID)
-    
-    if not pasta_contrato_id:
-        print(f"❌ Pasta do contrato não encontrada: {pasta_contrato}")
-        return None
+    try:
+        pasta_contrato = f"{numero_contrato}_{nome_empresa}"
+        pasta_unidade = f"{nome_unidade}_{cod_unidade}"
         
-    print(f"✅ Pasta do contrato encontrada: {pasta_contrato}")
-    print(f"🔍 Buscando pasta da unidade: {pasta_unidade}")
-    
-    pasta_unidade_id = gdrive.get_file_id_by_name(pasta_unidade, pasta_contrato_id)
-    if not pasta_unidade_id:
-        print(f"❌ Pasta da unidade não encontrada: {pasta_unidade}")
-        return None
+        logger.info(f"Buscando pasta do contrato: {pasta_contrato}")
+        pasta_contrato_id = gdrive.get_file_id_by_name(pasta_contrato, st.session_state.get("GDRIVE_EMPRESAS_FOLDER_ID"))
         
-    print(f"✅ Pasta da unidade encontrada: {pasta_unidade}")
-    return pasta_unidade_id
+        if not pasta_contrato_id:
+            logger.error(f"Pasta do contrato não encontrada: {pasta_contrato}")
+            return None
+            
+        logger.info(f"Pasta do contrato encontrada: {pasta_contrato}")
+        logger.info(f"Buscando pasta da unidade: {pasta_unidade}")
+        
+        pasta_unidade_id = gdrive.get_file_id_by_name(pasta_unidade, pasta_contrato_id)
+        if not pasta_unidade_id:
+            logger.error(f"Pasta da unidade não encontrada: {pasta_unidade}")
+            return None
+            
+        logger.info(f"Pasta da unidade encontrada: {pasta_unidade}")
+        return pasta_unidade_id
+    except Exception as e:
+        logger.error(f"Erro ao obter pasta da unidade: {e}")
+        return None
 
 
 def obter_info_unidade(cod_servico: str) -> Optional[Tuple[str, str, str]]:
@@ -83,11 +96,11 @@ def obter_info_unidade(cod_servico: str) -> Optional[Tuple[str, str, str]]:
             cursor.execute("SELECT cod_unidade FROM servicos WHERE cod_servico = ?", (cod_servico,))
             unidade_row = cursor.fetchone()
             if not unidade_row:
-                print(f"❌ Serviço não encontrado: {cod_servico}")
+                logger.error(f"Serviço não encontrado: {cod_servico}")
                 return None
                 
             cod_unidade = unidade_row[0]
-            print(f"✅ Código da unidade encontrado: {cod_unidade}")
+            logger.info(f"Código da unidade encontrado: {cod_unidade}")
             
             # Agora busca as informações completas da unidade
             cursor.execute("""
@@ -100,22 +113,24 @@ def obter_info_unidade(cod_servico: str) -> Optional[Tuple[str, str, str]]:
             
             row = cursor.fetchone()
             if not row:
-                print(f"❌ Informações incompletas para a unidade: {cod_unidade}")
+                logger.error(f"Informações incompletas para a unidade: {cod_unidade}")
                 return None
                 
-            print(f"✅ Informações da unidade encontradas:")
-            print(f"   - Nome: {row[0]}")
-            print(f"   - Contrato: {row[1]}")
-            print(f"   - Empresa: {row[2]}")
+            logger.info(f"Informações da unidade encontradas:")
+            logger.info(f"   - Nome: {row[0]}")
+            logger.info(f"   - Contrato: {row[1]}")
+            logger.info(f"   - Empresa: {row[2]}")
             return row
             
-    except sqlite3.Error as e:
-        print(f"❌ Erro ao buscar informações da unidade: {e}")
+    except Exception as e:
+        logger.error(f"Erro ao buscar informações da unidade: {e}")
         return None
 
 
 def criar_servico(cod_servico: str, cod_unidade: str, tipo_servico: str, data_criacao: str, data_execucao: str, status: str, observacoes: str) -> bool:
     try:
+        logger.info(f"Iniciando criação do serviço {cod_servico}")
+        
         # Primeiro verifica se a unidade existe e obtém suas informações
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
@@ -129,52 +144,88 @@ def criar_servico(cod_servico: str, cod_unidade: str, tipo_servico: str, data_cr
             row = cursor.fetchone()
             
             if not row:
-                print(f"❌ Unidade não encontrada: {cod_unidade}")
+                logger.error(f"Unidade não encontrada: {cod_unidade}")
                 return False
                 
             nome_unidade, numero_contrato, nome_empresa, pasta_unidade_id, pasta_contrato_id, pasta_empresa_id = row
             
             if not pasta_unidade_id:
-                print(f"❌ Pasta da unidade não encontrada no banco para: {cod_unidade}")
+                logger.error(f"Pasta da unidade não encontrada no banco para: {cod_unidade}")
                 return False
 
-        print(f"✅ Informações encontradas:")
-        print(f"   - Unidade: {nome_unidade}")
-        print(f"   - Contrato: {numero_contrato}")
-        print(f"   - Empresa: {nome_empresa}")
-        print(f"   - ID Pasta Unidade: {pasta_unidade_id}")
-        print(f"   - ID Pasta Contrato: {pasta_contrato_id}")
-        print(f"   - ID Pasta Empresa: {pasta_empresa_id}")
+        logger.info(f"Informações encontradas:")
+        logger.info(f"   - Unidade: {nome_unidade}")
+        logger.info(f"   - Contrato: {numero_contrato}")
+        logger.info(f"   - Empresa: {nome_empresa}")
+        logger.info(f"   - ID Pasta Unidade: {pasta_unidade_id}")
+        logger.info(f"   - ID Pasta Contrato: {pasta_contrato_id}")
+        logger.info(f"   - ID Pasta Empresa: {pasta_empresa_id}")
 
         # Cria a pasta do serviço
         timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
         nome_pasta_servico = f"{cod_servico}_{nome_unidade}_{timestamp}"
-        print(f"📁 Criando pasta do serviço: {nome_pasta_servico}")
+        logger.info(f"Criando pasta do serviço: {nome_pasta_servico}")
         
         # Usa o ID da pasta da unidade para criar a pasta do serviço
         pasta_servico_id = gdrive.ensure_folder(nome_pasta_servico, pasta_unidade_id)
         if not pasta_servico_id:
-            print("❌ Erro ao criar pasta do serviço")
+            logger.error("Erro ao criar pasta do serviço")
             return False
-        print(f"✅ Pasta do serviço criada com sucesso: {pasta_servico_id}")
+        logger.info(f"Pasta do serviço criada com sucesso: {pasta_servico_id}")
 
-        # Salva no banco de dados
-        with db.obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO servicos (
-                    cod_servico, cod_unidade, tipo_servico, data_criacao, 
-                    data_execucao, status, observacoes, pasta_servico
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                cod_servico, cod_unidade, tipo_servico, data_criacao,
-                data_execucao, status, observacoes, pasta_servico_id
-            ))
-            print("✅ Serviço salvo no banco de dados")
-            return True
+        try:
+            # Inicia uma transação
+            with db.obter_conexao() as conn:
+                cursor = conn.cursor()
+                conn.execute("BEGIN TRANSACTION")
+                
+                # Verifica se o código do serviço já existe
+                cursor.execute("SELECT cod_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
+                if cursor.fetchone():
+                    logger.warning(f"Tentativa de criar serviço com código duplicado: {cod_servico}")
+                    conn.rollback()
+                    return False
+                
+                # Insere no banco
+                cursor.execute("""
+                    INSERT INTO servicos (
+                        cod_servico, cod_unidade, tipo_servico, data_criacao, 
+                        data_execucao, status, observacoes, pasta_servico
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    cod_servico, cod_unidade, tipo_servico, data_criacao,
+                    data_execucao, status, observacoes, pasta_servico_id
+                ))
+                
+                # Força o commit
+                conn.commit()
+                logger.info("Dados inseridos no banco com sucesso")
+                
+                # Verifica se o serviço foi realmente inserido
+                cursor.execute("SELECT cod_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
+                if not cursor.fetchone():
+                    logger.error("Erro: Serviço não foi inserido no banco")
+                    conn.rollback()
+                    return False
+                
+                # Salva no Drive
+                caminho_banco = Path(gettempdir()) / db.DB_NAME
+                try:
+                    db.salvar_banco_no_drive(caminho_banco)
+                    logger.info(f"Serviço {cod_servico} criado com sucesso")
+                    return True
+                except Exception as e:
+                    logger.error(f"Erro ao salvar banco no Drive: {e}")
+                    # Mesmo com erro no Drive, o serviço foi criado localmente
+                    return True
+                    
+        except Exception as e:
+            logger.error(f"Erro durante a transação: {e}")
+            conn.rollback()
+            return False
 
     except Exception as e:
-        print(f"❌ Erro ao criar serviço: {e}")
+        logger.error(f"Erro ao criar serviço: {e}")
         return False
 
 
