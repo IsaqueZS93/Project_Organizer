@@ -4,6 +4,7 @@ import streamlit as st
 from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
+import datetime
 from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa model de funcionário
@@ -56,7 +57,18 @@ def exibir_tela_listar_funcionarios():
 
         with st.form("form_edicao_func"):
             nome = st.text_input("Nome completo", value=f[1])
-            nascimento = st.date_input("Data de nascimento", value=f[2])
+            
+            # Data de nascimento com range amplo
+            min_date = datetime.date(1900, 1, 1)
+            max_date = datetime.date.today()
+            data_nascimento = datetime.datetime.strptime(f[2], "%Y-%m-%d").date()
+            nascimento = st.date_input(
+                "Data de nascimento",
+                min_value=min_date,
+                max_value=max_date,
+                value=data_nascimento
+            )
+            
             cpf = st.text_input("CPF", value=f[3])
             cod_func = st.text_input("Código do Funcionário", value=f[4])
             funcao = st.text_input("Função", value=f[5])
@@ -64,10 +76,13 @@ def exibir_tela_listar_funcionarios():
             enviado = st.form_submit_button("Salvar alterações")
 
             if enviado:
+                # Converte a data para string no formato YYYY-MM-DD
+                data_nascimento = nascimento.strftime("%Y-%m-%d")
+                
                 sucesso = model_funcionario.atualizar_funcionario(
                     func_id=f[0],
                     nome=nome,
-                    data_nascimento=str(nascimento),
+                    data_nascimento=data_nascimento,
                     cpf=cpf,
                     cod_funcionario=cod_func,
                     funcao=funcao

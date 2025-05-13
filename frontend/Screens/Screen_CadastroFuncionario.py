@@ -27,11 +27,14 @@ def exibir_tela_cadastro_funcionario():
     with st.form("form_funcionario"):
         nome = st.text_input("Nome completo")
         
-        # Data de nascimento sem restrições
+        # Data de nascimento com range amplo
+        min_date = datetime.date(1900, 1, 1)
+        max_date = datetime.date.today()
         nascimento = st.date_input(
             "Data de nascimento",
-            value=datetime.date(1990, 1, 1),
-            format="DD/MM/YYYY"
+            min_value=min_date,
+            max_value=max_date,
+            value=datetime.date(1990, 1, 1)
         )
         
         cpf = st.text_input("CPF")
