@@ -8,7 +8,7 @@ import logging
 from backend.Database.db_gestaodecontratos import autenticar_usuario
 from backend.Services.Service_googledrive import get_service
 
-# Configuração de logging
+# Configuração de loggings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
