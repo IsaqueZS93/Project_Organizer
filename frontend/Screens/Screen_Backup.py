@@ -73,6 +73,15 @@ def exportar_dados_json():
         if not temp_file:
             return None
 
+        # Verifica se o arquivo existe e tem conteúdo
+        if not temp_file.exists():
+            st.error("❌ Erro: Arquivo temporário não foi criado")
+            return None
+            
+        if temp_file.stat().st_size == 0:
+            st.error("❌ Erro: Arquivo temporário está vazio")
+            return None
+
         # Conecta ao banco de dados temporário
         conn = sqlite3.connect(str(temp_file))
         cursor = conn.cursor()
@@ -80,54 +89,65 @@ def exportar_dados_json():
         # Obtém dados de todas as tabelas
         dados = {}
 
-        # Empresas
-        cursor.execute("SELECT * FROM empresas")
-        colunas = [description[0] for description in cursor.description]
-        empresas = cursor.fetchall()
-        dados["empresas"] = [dict(zip(colunas, empresa)) for empresa in empresas]
+        try:
+            # Empresas
+            cursor.execute("SELECT * FROM empresas")
+            colunas = [description[0] for description in cursor.description]
+            empresas = cursor.fetchall()
+            dados["empresas"] = [dict(zip(colunas, empresa)) for empresa in empresas]
 
-        # Contratos
-        cursor.execute("SELECT * FROM contratos")
-        colunas = [description[0] for description in cursor.description]
-        contratos = cursor.fetchall()
-        dados["contratos"] = [dict(zip(colunas, contrato)) for contrato in contratos]
+            # Contratos
+            cursor.execute("SELECT * FROM contratos")
+            colunas = [description[0] for description in cursor.description]
+            contratos = cursor.fetchall()
+            dados["contratos"] = [dict(zip(colunas, contrato)) for contrato in contratos]
 
-        # Unidades
-        cursor.execute("SELECT * FROM unidades")
-        colunas = [description[0] for description in cursor.description]
-        unidades = cursor.fetchall()
-        dados["unidades"] = [dict(zip(colunas, unidade)) for unidade in unidades]
+            # Unidades
+            cursor.execute("SELECT * FROM unidades")
+            colunas = [description[0] for description in cursor.description]
+            unidades = cursor.fetchall()
+            dados["unidades"] = [dict(zip(colunas, unidade)) for unidade in unidades]
 
-        # Serviços
-        cursor.execute("SELECT * FROM servicos")
-        colunas = [description[0] for description in cursor.description]
-        servicos = cursor.fetchall()
-        dados["servicos"] = [dict(zip(colunas, servico)) for servico in servicos]
+            # Serviços
+            cursor.execute("SELECT * FROM servicos")
+            colunas = [description[0] for description in cursor.description]
+            servicos = cursor.fetchall()
+            dados["servicos"] = [dict(zip(colunas, servico)) for servico in servicos]
 
-        # Usuários (excluindo senhas)
-        cursor.execute("SELECT usuario, nome, tipo FROM usuarios")
-        colunas = [description[0] for description in cursor.description]
-        usuarios = cursor.fetchall()
-        dados["usuarios"] = [dict(zip(colunas, usuario)) for usuario in usuarios]
+            # Usuários (excluindo senhas)
+            cursor.execute("SELECT usuario, nome, tipo FROM usuarios")
+            colunas = [description[0] for description in cursor.description]
+            usuarios = cursor.fetchall()
+            dados["usuarios"] = [dict(zip(colunas, usuario)) for usuario in usuarios]
 
-        # Funcionários
-        cursor.execute("SELECT * FROM funcionarios")
-        colunas = [description[0] for description in cursor.description]
-        funcionarios = cursor.fetchall()
-        dados["funcionarios"] = [dict(zip(colunas, funcionario)) for funcionario in funcionarios]
+            # Funcionários
+            cursor.execute("SELECT * FROM funcionarios")
+            colunas = [description[0] for description in cursor.description]
+            funcionarios = cursor.fetchall()
+            dados["funcionarios"] = [dict(zip(colunas, funcionario)) for funcionario in funcionarios]
 
-        # Fecha a conexão
-        conn.close()
+        except sqlite3.Error as e:
+            st.error(f"❌ Erro ao ler dados do banco: {str(e)}")
+            return None
+        finally:
+            # Fecha a conexão
+            conn.close()
 
         # Remove o arquivo temporário
-        temp_file.unlink()
+        try:
+            temp_file.unlink()
+        except Exception as e:
+            logger.warning(f"Erro ao remover arquivo temporário: {e}")
 
         # Converte para JSON
         return json.dumps(dados, indent=2, ensure_ascii=False)
     except Exception as e:
-        st.error(f"Erro ao exportar dados: {e}")
+        st.error(f"❌ Erro ao exportar dados: {str(e)}")
         if temp_file and temp_file.exists():
-            temp_file.unlink()
+            try:
+                temp_file.unlink()
+            except:
+                pass
         return None
 
 def criar_backup_banco():
