@@ -78,6 +78,14 @@ def get_folder_id():
         # Em caso de erro, retorna o valor padrão
         return "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
 
+def get_folder_name(folder_id: str) -> str:
+    """Obtém o nome de uma pasta do Drive"""
+    try:
+        file = gdrive.get_file_info(folder_id)
+        return file.get('name', 'Pasta sem nome')
+    except:
+        return 'Pasta sem nome'
+
 def exibir_conteudo_pasta(folder_id: str):
     """Exibe o conteúdo de uma pasta do Drive em formato de grade"""
     try:
@@ -108,6 +116,13 @@ def exibir_conteudo_pasta(folder_id: str):
                     
                     # Botões em coluna única para mais espaço
                     if st.button("📂 Abrir Pasta", key=f"view_{pasta['id']}", use_container_width=True):
+                        # Adiciona a pasta atual ao histórico antes de navegar
+                        if 'folder_history' not in st.session_state:
+                            st.session_state['folder_history'] = []
+                        st.session_state['folder_history'].append({
+                            'id': st.session_state['current_folder'],
+                            'name': get_folder_name(st.session_state['current_folder'])
+                        })
                         st.session_state['current_folder'] = pasta['id']
                         st.rerun()
                     if st.button("🔄 Atualizar", key=f"refresh_{pasta['id']}", use_container_width=True):
@@ -200,24 +215,43 @@ def exibir_tela_grid_pastas():
 
     st.title("📁 Navegador de Pastas")
 
-    # Inicializa estado da pasta atual
+    # Inicializa estado da pasta atual e histórico
     if 'current_folder' not in st.session_state:
         st.session_state['current_folder'] = get_folder_id()
+    if 'folder_history' not in st.session_state:
+        st.session_state['folder_history'] = []
 
     # Barra de navegação
     st.markdown("### 📂 Navegação")
     col1, col2, col3 = st.columns([2, 1, 1])
+    
     with col1:
         if st.button("🏠 Pasta Raiz"):
+            # Limpa o histórico ao voltar para a raiz
+            st.session_state['folder_history'] = []
             st.session_state['current_folder'] = get_folder_id()
             st.rerun()
+    
     with col2:
-        if st.button("⬅️ Voltar"):
-            # TODO: Implementar navegação para pasta anterior
-            st.info("Navegação para pasta anterior em desenvolvimento")
+        # Botão Voltar só fica ativo se houver histórico
+        if st.session_state['folder_history']:
+            if st.button("⬅️ Voltar"):
+                # Pega a última pasta do histórico
+                ultima_pasta = st.session_state['folder_history'].pop()
+                st.session_state['current_folder'] = ultima_pasta['id']
+                st.rerun()
+        else:
+            st.button("⬅️ Voltar", disabled=True)
+    
     with col3:
         if st.button("🔄 Atualizar"):
             st.rerun()
+
+    # Exibe caminho atual
+    if st.session_state['folder_history']:
+        caminho = " > ".join([p['name'] for p in st.session_state['folder_history']])
+        caminho += f" > {get_folder_name(st.session_state['current_folder'])}"
+        st.markdown(f"**Caminho atual:** {caminho}")
 
     # Exibe conteúdo da pasta atual
     st.markdown("---")
