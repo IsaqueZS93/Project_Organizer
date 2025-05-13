@@ -160,7 +160,7 @@ def exibir_tela_servicos_ope():
                             with st.container():
                                 # Ícone baseado no tipo de arquivo
                                 if arquivo[2].startswith('image/'):
-                                    st.image("https://drive.google.com/uc?export=view&id=" + arquivo[5], use_column_width=True)
+                                    st.image("https://drive.google.com/uc?export=view&id=" + arquivo[5], use_container_width=True)
                                 else:
                                     st.write(get_file_icon(arquivo[2]))
                                 
