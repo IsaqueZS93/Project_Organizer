@@ -55,9 +55,36 @@ def format_file_size(size_bytes: int) -> str:
     
     return f"{size_bytes:.1f} {size_names[i]}"
 
+def get_folder_id():
+    """Obtém o ID da pasta do Drive do session_state ou do secrets.toml"""
+    try:
+        # Tenta obter do session_state
+        if "GDRIVE_EMPRESAS_FOLDER_ID" in st.session_state:
+            return st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"]
+            
+        # Se não estiver no session_state, tenta obter do secrets.toml
+        if "gdrive" in st.secrets and "empresas_folder_id" in st.secrets["gdrive"]:
+            folder_id = st.secrets["gdrive"]["empresas_folder_id"]
+            st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = folder_id
+            return folder_id
+            
+        # Se não encontrar em nenhum lugar, usa o valor padrão
+        default_id = "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
+        st.session_state["GDRIVE_EMPRESAS_FOLDER_ID"] = default_id
+        return default_id
+        
+    except Exception as e:
+        logger.error(f"Erro ao obter folder_id: {str(e)}")
+        # Em caso de erro, retorna o valor padrão
+        return "1H1y0x5RPzfcm6xD95OaOcJ023u4RcPk5"
+
 def exibir_conteudo_pasta(folder_id: str):
     """Exibe o conteúdo de uma pasta do Drive em formato de grade"""
     try:
+        if not folder_id:
+            st.error("ID da pasta não encontrado. Por favor, verifique as configurações.")
+            return
+            
         # Lista arquivos e pastas
         items = gdrive.list_files_in_folder(folder_id)
         
@@ -131,7 +158,7 @@ def exibir_conteudo_pasta(folder_id: str):
                                     listar_pastas_recursivamente(item['id'], nivel + 1)
                         
                         # Inicia a listagem a partir da pasta raiz
-                        listar_pastas_recursivamente(os.getenv("GDRIVE_EMPRESAS_FOLDER_ID"))
+                        listar_pastas_recursivamente(get_folder_id())
                         
                         # Remove a pasta atual da lista
                         todas_pastas = [p for p in todas_pastas if p['id'] != folder_id]
@@ -175,14 +202,14 @@ def exibir_tela_grid_pastas():
 
     # Inicializa estado da pasta atual
     if 'current_folder' not in st.session_state:
-        st.session_state['current_folder'] = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID")
+        st.session_state['current_folder'] = get_folder_id()
 
     # Barra de navegação
     st.markdown("### 📂 Navegação")
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         if st.button("🏠 Pasta Raiz"):
-            st.session_state['current_folder'] = os.getenv("GDRIVE_EMPRESAS_FOLDER_ID")
+            st.session_state['current_folder'] = get_folder_id()
             st.rerun()
     with col2:
         if st.button("⬅️ Voltar"):
