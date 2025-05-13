@@ -17,15 +17,13 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT_DIR / ".env"
 load_dotenv(ENV_PATH)
 
-# Constantes para credenciais padrão
-ADMIN_USER = os.getenv("DEFAULT_ADMIN_USER", "Isaque.Z")
-ADMIN_PASS = os.getenv("DEFAULT_ADMIN_PASS", "071959")
-
 def validar_credenciais_admin(usuario: str, senha: str) -> bool:
     """Valida credenciais do administrador padrão"""
     logger.info(f"Validando credenciais admin - Usuário: {usuario}")
-    logger.info(f"ADMIN_USER configurado: {ADMIN_USER}")
-    return usuario == ADMIN_USER and senha == ADMIN_PASS
+    admin_user = st.secrets.get("DEFAULT_ADMIN_USER")
+    admin_pass = st.secrets.get("DEFAULT_ADMIN_PASS")
+    logger.info(f"ADMIN_USER configurado: {admin_user}")
+    return usuario == admin_user and senha == admin_pass
 
 def login():
     """Exibe a tela de login e gerencia a autenticação"""
