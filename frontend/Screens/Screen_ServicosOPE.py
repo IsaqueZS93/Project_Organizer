@@ -157,17 +157,18 @@ def exibir_tela_servicos_ope():
                             st.markdown(f"Upload: {a[3]}")
                         with col2:
                             if st.button("📥 Download", key=f"down_{a[0]}"):
-                                arquivo_bytes = model_servico.download_arquivo_servico(a[0])
-                                if arquivo_bytes:
-                                    st.download_button(
-                                        label="Baixar Arquivo",
-                                        data=arquivo_bytes,
-                                        file_name=a[1],
-                                        mime=a[2],
-                                        key=f"download_{a[0]}"
-                                    )
-                                else:
-                                    st.error("Erro ao baixar arquivo")
+                                with st.spinner("Baixando arquivo..."):
+                                    arquivo_bytes = model_servico.download_arquivo_servico(a[0])
+                                    if arquivo_bytes:
+                                        st.download_button(
+                                            label="Baixar Arquivo",
+                                            data=arquivo_bytes,
+                                            file_name=a[1],
+                                            mime=a[2],
+                                            key=f"download_{a[0]}"
+                                        )
+                                    else:
+                                        st.error("Erro ao baixar arquivo. Tente novamente.")
                 else:
                     st.info("Nenhum arquivo encontrado com os filtros selecionados.")
 

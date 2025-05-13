@@ -463,6 +463,7 @@ def listar_funcionarios_servico(cod_servico: str) -> List[Tuple]:
 
 def download_arquivo_servico(arquivo_id: int) -> Optional[bytes]:
     """Baixa um arquivo do serviço pelo ID do registro no banco"""
+    temp_file = None
     try:
         # Busca informações do arquivo no banco
         with db.obter_conexao() as conn:
@@ -475,37 +476,44 @@ def download_arquivo_servico(arquivo_id: int) -> Optional[bytes]:
             row = cursor.fetchone()
             
             if not row:
-                print(f"❌ Arquivo não encontrado no banco: {arquivo_id}")
+                logger.error(f"Arquivo não encontrado no banco: {arquivo_id}")
                 return None
                 
             nome_arquivo, drive_file_id, tipo_arquivo = row
             
-        print(f"📥 Iniciando download do arquivo:")
-        print(f"   - Nome: {nome_arquivo}")
-        print(f"   - Tipo: {tipo_arquivo}")
-        print(f"   - ID Drive: {drive_file_id}")
+        logger.info(f"Iniciando download do arquivo:")
+        logger.info(f"   - Nome: {nome_arquivo}")
+        logger.info(f"   - Tipo: {tipo_arquivo}")
+        logger.info(f"   - ID Drive: {drive_file_id}")
         
         # Cria um arquivo temporário para o download
         temp_file = Path(gettempdir()) / nome_arquivo
         
         # Baixa o arquivo do Drive para o arquivo temporário
         if not gdrive.download_file(drive_file_id, str(temp_file)):
-            print("❌ Erro ao baixar arquivo do Drive")
+            logger.error("Erro ao baixar arquivo do Drive")
             return None
             
         # Lê o conteúdo do arquivo temporário
-        arquivo_bytes = temp_file.read_bytes()
-        
-        # Remove o arquivo temporário
-        temp_file.unlink()
+        try:
+            arquivo_bytes = temp_file.read_bytes()
+            logger.info(f"Arquivo baixado com sucesso: {len(arquivo_bytes)} bytes")
+            return arquivo_bytes
+        except Exception as e:
+            logger.error(f"Erro ao ler arquivo temporário: {e}")
+            return None
             
-        print(f"✅ Arquivo baixado com sucesso")
-        return arquivo_bytes
-        
     except Exception as e:
-        print(f"❌ Erro ao baixar arquivo: {e}")
+        logger.error(f"Erro ao baixar arquivo: {e}")
         return None
-
+    finally:
+        # Garante que o arquivo temporário seja removido
+        if temp_file and temp_file.exists():
+            try:
+                temp_file.unlink()
+                logger.info("Arquivo temporário removido com sucesso")
+            except Exception as e:
+                logger.error(f"Erro ao remover arquivo temporário: {e}")
 
 def obter_info_arquivo(arquivo_id: int) -> Optional[Tuple]:
     """Obtém informações de um arquivo do serviço"""
