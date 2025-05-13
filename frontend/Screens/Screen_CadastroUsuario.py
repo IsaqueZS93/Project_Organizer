@@ -5,6 +5,7 @@ from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
 from frontend.Utils.auth import verificar_permissao_admin
+import datetime
 
 # Importa model de usuário
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -27,7 +28,17 @@ def exibir_tela_cadastro_usuario():
     # ──── Formulário ────
     with st.form("form_usuario"):
         nome = st.text_input("Nome completo")
-        nascimento = st.date_input("Data de nascimento")
+        
+        # Data de nascimento com range amplo
+        min_date = datetime.date(1900, 1, 1)
+        max_date = datetime.date.today()
+        nascimento = st.date_input(
+            "Data de nascimento",
+            min_value=min_date,
+            max_value=max_date,
+            value=datetime.date(1990, 1, 1)
+        )
+        
         funcao = st.text_input("Função")
         usuario = st.text_input("Nome de usuário")
         senha = st.text_input("Senha", type="password")
