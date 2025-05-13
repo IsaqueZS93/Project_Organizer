@@ -4,6 +4,7 @@ import streamlit as st
 from Styles.theme import aplicar_estilo_geral
 from pathlib import Path
 import sys
+import datetime
 from frontend.Utils.auth import verificar_permissao_admin
 
 # Importa model do funcionário
@@ -25,7 +26,17 @@ def exibir_tela_cadastro_funcionario():
 
     with st.form("form_funcionario"):
         nome = st.text_input("Nome completo")
-        nascimento = st.date_input("Data de nascimento")
+        
+        # Data de nascimento com range amplo
+        min_date = datetime.date(1900, 1, 1)
+        max_date = datetime.date.today()
+        nascimento = st.date_input(
+            "Data de nascimento",
+            min_value=min_date,
+            max_value=max_date,
+            value=datetime.date(1990, 1, 1)
+        )
+        
         cpf = st.text_input("CPF")
         cod_funcionario = st.text_input("Código do Funcionário (único)")
         funcao = st.text_input("Função")
@@ -36,14 +47,18 @@ def exibir_tela_cadastro_funcionario():
             if not nome or not cpf or not cod_funcionario:
                 st.warning("Por favor, preencha todos os campos obrigatórios.")
             else:
-                sucesso = model_funcionario.criar_funcionario(
-                    nome=nome,
-                    data_nascimento=str(nascimento),
-                    cpf=cpf,
-                    cod_funcionario=cod_funcionario,
-                    funcao=funcao
-                )
-                if sucesso:
-                    st.success("Funcionário cadastrado com sucesso!")
-                else:
-                    st.error("Erro ao cadastrar funcionário. Verifique se o CPF ou código já existe.")
+                try:
+                    sucesso = model_funcionario.criar_funcionario(
+                        nome=nome,
+                        data_nascimento=str(nascimento),
+                        cpf=cpf,
+                        cod_funcionario=cod_funcionario,
+                        funcao=funcao
+                    )
+                    if sucesso:
+                        st.success("Funcionário cadastrado com sucesso!")
+                        st.rerun()  # Recarrega a página para limpar o formulário
+                    else:
+                        st.error("Erro ao cadastrar funcionário. Verifique se o CPF ou código já existe.")
+                except Exception as e:
+                    st.error(f"Erro ao cadastrar funcionário: {str(e)}")
