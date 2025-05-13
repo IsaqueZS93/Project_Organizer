@@ -10,9 +10,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Importa models
+# Importa models e database
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from Models import model_usuario
+from Database import db_gestaodecontratos as db
 
 def login():
     """Realiza o login do usuário"""
@@ -42,10 +43,13 @@ def login():
                 st.rerun()
             else:
                 # Se não for admin, tenta login normal
-                if model_usuario.verificar_login(usuario, senha):
+                sucesso, tipo, nome = db.autenticar_usuario(usuario, senha)
+                
+                if sucesso:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario"] = usuario
-                    st.session_state["tipo"] = model_usuario.obter_tipo_usuario(usuario)
+                    st.session_state["tipo"] = tipo
+                    st.session_state["nome"] = nome
                     st.success("Login realizado com sucesso!")
                     st.rerun()
                 else:
