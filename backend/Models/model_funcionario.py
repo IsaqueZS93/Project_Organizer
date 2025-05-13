@@ -45,6 +45,12 @@ def criar_funcionario(nome: str, data_nascimento: str, cpf: str, cod_funcionario
             # Força o commit
             conn.commit()
             
+            # Verifica se o funcionário foi realmente inserido
+            cursor.execute("SELECT id FROM funcionarios WHERE cpf = ?", (cpf,))
+            if not cursor.fetchone():
+                logger.error("Erro: Funcionário não foi inserido no banco")
+                return False
+            
             # Salva no Drive
             caminho_banco = Path(gettempdir()) / db.DB_NAME
             try:
@@ -108,6 +114,12 @@ def atualizar_funcionario(funcionario_id: int, nome: str, data_nascimento: str, 
             # Força o commit
             conn.commit()
             
+            # Verifica se a atualização foi bem sucedida
+            cursor.execute("SELECT id FROM funcionarios WHERE id = ? AND nome = ?", (funcionario_id, nome))
+            if not cursor.fetchone():
+                logger.error("Erro: Atualização do funcionário não foi confirmada")
+                return False
+            
             # Salva no Drive
             caminho_banco = Path(gettempdir()) / db.DB_NAME
             try:
@@ -128,10 +140,23 @@ def deletar_funcionario(funcionario_id: int) -> bool:
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
+            
+            # Verifica se o funcionário existe
+            cursor.execute("SELECT id FROM funcionarios WHERE id = ?", (funcionario_id,))
+            if not cursor.fetchone():
+                logger.warning(f"Tentativa de deletar funcionário inexistente: {funcionario_id}")
+                return False
+                
             cursor.execute("DELETE FROM funcionarios WHERE id = ?", (funcionario_id,))
             
             # Força o commit
             conn.commit()
+            
+            # Verifica se o funcionário foi realmente deletado
+            cursor.execute("SELECT id FROM funcionarios WHERE id = ?", (funcionario_id,))
+            if cursor.fetchone():
+                logger.error("Erro: Funcionário não foi deletado do banco")
+                return False
 
             # Salva no Drive
             caminho_banco = Path(gettempdir()) / db.DB_NAME
@@ -148,13 +173,13 @@ def deletar_funcionario(funcionario_id: int) -> bool:
         logger.error(f"Erro ao deletar funcionário: {e}")
         return False
 
-def buscar_funcionario_por_codigo(cod_funcionario: str) -> Tuple:
+def buscar_funcionario_por_codigo(cod_funcionario: str) -> Optional[Tuple]:
     """Busca um funcionário pelo código"""
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM funcionarios WHERE cod_funcionario = ?", (cod_funcionario,))
             return cursor.fetchone()
-    except sqlite3.Error as e:
-        print(f"❌ Erro ao buscar funcionário: {e}")
+    except Exception as e:
+        logger.error(f"Erro ao buscar funcionário: {e}")
         return None

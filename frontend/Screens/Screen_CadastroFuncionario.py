@@ -27,14 +27,11 @@ def exibir_tela_cadastro_funcionario():
     with st.form("form_funcionario"):
         nome = st.text_input("Nome completo")
         
-        # Data de nascimento com range amplo
-        min_date = datetime.date(1900, 1, 1)
-        max_date = datetime.date.today()
+        # Data de nascimento sem restrições
         nascimento = st.date_input(
             "Data de nascimento",
-            min_value=min_date,
-            max_value=max_date,
-            value=datetime.date(1990, 1, 1)
+            value=datetime.date(1990, 1, 1),
+            format="DD/MM/YYYY"
         )
         
         cpf = st.text_input("CPF")
@@ -48,17 +45,23 @@ def exibir_tela_cadastro_funcionario():
                 st.warning("Por favor, preencha todos os campos obrigatórios.")
             else:
                 try:
+                    # Converte a data para string no formato YYYY-MM-DD
+                    data_nascimento = nascimento.strftime("%Y-%m-%d")
+                    
                     sucesso = model_funcionario.criar_funcionario(
                         nome=nome,
-                        data_nascimento=str(nascimento),
+                        data_nascimento=data_nascimento,
                         cpf=cpf,
                         cod_funcionario=cod_funcionario,
                         funcao=funcao
                     )
+                    
                     if sucesso:
                         st.success("Funcionário cadastrado com sucesso!")
-                        st.rerun()  # Recarrega a página para limpar o formulário
+                        # Limpa o formulário
+                        st.rerun()
                     else:
                         st.error("Erro ao cadastrar funcionário. Verifique se o CPF ou código já existe.")
                 except Exception as e:
                     st.error(f"Erro ao cadastrar funcionário: {str(e)}")
+                    st.error("Por favor, tente novamente.")
