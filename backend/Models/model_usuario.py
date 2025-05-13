@@ -60,7 +60,7 @@ def listar_usuarios() -> List[Tuple]:
             cursor.execute("SELECT id, nome, usuario, tipo, funcao FROM usuarios")
             return cursor.fetchall()
     except Exception as e:
-        print(f"❌ Erro ao listar usuários: {e}")
+        logger.error(f"Erro ao listar usuários: {e}")
         return []
 
 
@@ -71,28 +71,47 @@ def buscar_usuario_por_id(usuario_id: int) -> Optional[Tuple]:
             cursor.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,))
             return cursor.fetchone()
     except Exception as e:
-        print(f"❌ Erro ao buscar usuário: {e}")
+        logger.error(f"Erro ao buscar usuário: {e}")
         return None
 
 
 def atualizar_usuario(usuario_id: int, nome: str, data_nascimento: str, funcao: str, usuario: str, senha: str, tipo: str) -> bool:
     try:
-        conn = obter_conexao()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE usuarios
-            SET nome = ?, data_nascimento = ?, funcao = ?, usuario = ?, senha = ?, tipo = ?
-            WHERE id = ?
-        """, (nome, data_nascimento, funcao, usuario, senha, tipo, usuario_id))
-        conn.commit()
+        # Primeiro verifica se o novo nome de usuário já existe (exceto para o próprio usuário)
+        with obter_conexao() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id FROM usuarios 
+                WHERE usuario = ? AND id != ?
+            """, (usuario, usuario_id))
+            
+            if cursor.fetchone():
+                logger.warning(f"Tentativa de atualizar para um nome de usuário já existente: {usuario}")
+                return False
 
-        caminho_banco = Path(gettempdir()) / DB_NAME
-        salvar_banco_no_drive(caminho_banco)
-        conn.close()
-
-        return True
+            # Atualiza o usuário
+            cursor.execute("""
+                UPDATE usuarios
+                SET nome = ?, data_nascimento = ?, funcao = ?, usuario = ?, senha = ?, tipo = ?
+                WHERE id = ?
+            """, (nome, data_nascimento, funcao, usuario, senha, tipo, usuario_id))
+            
+            # Força o commit
+            conn.commit()
+            
+            # Salva no Drive
+            caminho_banco = Path(gettempdir()) / DB_NAME
+            try:
+                salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Usuário {usuario} atualizado com sucesso")
+                return True
+            except Exception as e:
+                logger.error(f"Erro ao salvar banco no Drive: {e}")
+                # Mesmo com erro no Drive, o usuário foi atualizado localmente
+                return True
+                
     except Exception as e:
-        print("Erro ao atualizar usuário:", e)
+        logger.error(f"Erro ao atualizar usuário: {e}")
         return False
 
 
@@ -101,12 +120,23 @@ def deletar_usuario(usuario_id: int) -> bool:
         with obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
+            
+            # Força o commit
+            conn.commit()
 
+            # Salva no Drive
             caminho_banco = Path(gettempdir()) / DB_NAME
-            salvar_banco_no_drive(caminho_banco)
-            return True
+            try:
+                salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Usuário {usuario_id} deletado com sucesso")
+                return True
+            except Exception as e:
+                logger.error(f"Erro ao salvar banco no Drive: {e}")
+                # Mesmo com erro no Drive, o usuário foi deletado localmente
+                return True
+                
     except Exception as e:
-        print(f"❌ Erro ao deletar usuário: {e}")
+        logger.error(f"Erro ao deletar usuário: {e}")
         return False
 
 
@@ -120,5 +150,5 @@ def autenticar_usuario(usuario: str, senha: str) -> Optional[Tuple]:
             """, (usuario, senha))
             return cursor.fetchone()
     except Exception as e:
-        print(f"❌ Erro ao autenticar usuário: {e}")
+        logger.error(f"Erro ao autenticar usuário: {e}")
         return None
