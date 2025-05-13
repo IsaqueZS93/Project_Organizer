@@ -37,6 +37,8 @@ def obter_nome_empresa_por_codigo(cod_empresa: str) -> Optional[str]:
 
 def criar_contrato(cod_empresa: str, empresa_contratada: str, numero_contrato: str, titulo: str, especificacoes: str) -> bool:
     try:
+        logger.info(f"Iniciando criação do contrato {numero_contrato}")
+        
         with obter_conexao() as conn:
             cursor = conn.cursor()
             
@@ -75,31 +77,42 @@ def criar_contrato(cod_empresa: str, empresa_contratada: str, numero_contrato: s
                 
             logger.info(f"Pasta do contrato criada com sucesso: {nome_pasta_contrato}")
 
-            # Insere no banco
-            cursor.execute("""
-                INSERT INTO contratos (numero_contrato, cod_empresa, empresa_contratada, titulo, especificacoes, pasta_contrato)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (numero_contrato, cod_empresa, empresa_contratada, titulo, especificacoes, contrato_folder_id))
-            
-            # Força o commit
-            conn.commit()
-            
-            # Verifica se o contrato foi realmente inserido
-            cursor.execute("SELECT numero_contrato FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
-            if not cursor.fetchone():
-                logger.error("Erro: Contrato não foi inserido no banco")
-                return False
-
-            # Salva no Drive
-            caminho_banco = Path(gettempdir()) / DB_NAME
             try:
-                salvar_banco_no_drive(caminho_banco)
-                logger.info(f"Contrato {numero_contrato} criado com sucesso")
-                return True
+                # Inicia uma transação
+                conn.execute("BEGIN TRANSACTION")
+                
+                # Insere no banco
+                cursor.execute("""
+                    INSERT INTO contratos (numero_contrato, cod_empresa, empresa_contratada, titulo, especificacoes, pasta_contrato)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (numero_contrato, cod_empresa, empresa_contratada, titulo, especificacoes, contrato_folder_id))
+                
+                # Força o commit
+                conn.commit()
+                logger.info("Dados inseridos no banco com sucesso")
+                
+                # Verifica se o contrato foi realmente inserido
+                cursor.execute("SELECT numero_contrato FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
+                if not cursor.fetchone():
+                    logger.error("Erro: Contrato não foi inserido no banco")
+                    conn.rollback()
+                    return False
+                
+                # Salva no Drive
+                caminho_banco = Path(gettempdir()) / DB_NAME
+                try:
+                    salvar_banco_no_drive(caminho_banco)
+                    logger.info(f"Contrato {numero_contrato} criado com sucesso")
+                    return True
+                except Exception as e:
+                    logger.error(f"Erro ao salvar banco no Drive: {e}")
+                    # Mesmo com erro no Drive, o contrato foi criado localmente
+                    return True
+                    
             except Exception as e:
-                logger.error(f"Erro ao salvar banco no Drive: {e}")
-                # Mesmo com erro no Drive, o contrato foi criado localmente
-                return True
+                logger.error(f"Erro durante a transação: {e}")
+                conn.rollback()
+                return False
 
     except Exception as e:
         logger.error(f"Erro ao criar contrato: {e}")
