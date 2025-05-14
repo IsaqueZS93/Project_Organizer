@@ -62,7 +62,7 @@ with st.sidebar:
         if st.button("🚪 Sair", use_container_width=True):
             for key in ["usuario", "tipo", "pagina"]:
                 st.session_state.pop(key, None)
-            st.experimental_rerun()  # força redraw imediato
+            st.rerun()  # força redraw imediato
 
         st.markdown("---")
 
