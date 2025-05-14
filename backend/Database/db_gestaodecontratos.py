@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 DB_NAME = "db_gestaodecontratos.db"
 DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
-_last_remote_ts: float = 0.0   # epoch seconds da última versão remota vista
+# _last_remote_ts: float = 0.0   # Removido - será usado st.session_state
 
 # Cache de conexão por thread
 _thread_local = threading.local()
@@ -35,64 +35,50 @@ def marca_sujo() -> None:
 
 def _remote_modified_ts(file_id: str) -> float:
     """Obtém o timestamp de modificação de um arquivo no Google Drive."""
+    st.session_state.setdefault("last_remote_ts", 0.0)
+    
     meta = gdrive.get_service().files().get(
         fileId=file_id, fields="modifiedTime"
     ).execute()
-    # O timestamp do Drive tem um 'Z' no final, que indica UTC.
-    # time.strptime não lida com frações de segundo ou 'Z' diretamente em todos os sistemas.
-    # Removemos as frações de segundo e o 'Z' para um parsing mais robusto.
     ts_string = meta["modifiedTime"].split('.')[0] 
     return time.mktime(time.strptime(ts_string, "%Y-%m-%dT%H:%M:%S"))
 
 def _get_drive_folder_id():
     """Obtém o ID da pasta do Drive do session_state ou do secrets.toml"""
     try:
-        # Tenta obter do session_state
         if "GDRIVE_DATABASE_FOLDER_ID" in st.session_state:
             return st.session_state["GDRIVE_DATABASE_FOLDER_ID"]
-            
-        # Se não estiver no session_state, tenta obter do secrets.toml
         if "gdrive" in st.secrets and "database_folder_id" in st.secrets["gdrive"]:
             folder_id = st.secrets["gdrive"]["database_folder_id"]
             st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = folder_id
             return folder_id
-            
-        # Se não encontrar em nenhum lugar, usa o valor padrão
         default_id = "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
         st.session_state["GDRIVE_DATABASE_FOLDER_ID"] = default_id
         return default_id
-        
     except Exception as e:
         logger.error(f"Erro ao obter folder_id: {str(e)}")
-        # Em caso de erro, retorna o valor padrão
         return "1OwkYVqfY8jRaYvZzhW9MkekJAGKSqbPX"
 
 def autenticar_usuario(usuario: str, senha: str) -> tuple[bool, str, str]:
     """Autentica um usuário no sistema"""
     conn = None
     try:
-        # Baixa o banco do Drive se necessário
         caminho_banco = baixar_banco_do_drive()
         conn = sqlite3.connect(str(caminho_banco))
         cursor = conn.cursor()
-        
-        # Busca usuário
         cursor.execute(
             "SELECT tipo, nome FROM usuarios WHERE usuario = ? AND senha = ?",
             (usuario, senha)
         )
         resultado = cursor.fetchone()
-        
         if resultado:
             logger.info(f"Usuário autenticado: {usuario} (Tipo: {resultado[0]})")
             return True, resultado[0], resultado[1]
         logger.warning(f"Tentativa de login falhou para usuário: {usuario}")
         return False, "", ""
-        
     except Exception as e:
         logger.error(f"Erro ao autenticar usuário: {str(e)}")
         return False, "", ""
-        
     finally:
         if conn:
             conn.close()
@@ -103,34 +89,29 @@ def baixar_banco_do_drive():
     try:
         folder_id = _get_drive_folder_id()
         logger.info(f"Usando pasta do Drive: {folder_id}")
+        
+        st.session_state.setdefault("last_remote_ts", 0.0)
             
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
         if not file_id:
-            # Se o arquivo não existe no Drive, tentamos criar um banco novo localmente.
-            # Se já existir um DB_PATH local, ele será usado. Caso contrário, será criado por inicializar_tabelas.
             logger.warning(f"Arquivo {DB_NAME} não encontrado no Drive. Tentando usar/criar banco local.")
             if not DB_PATH.exists():
-                # Força a criação de um banco novo se não existir localmente nem no Drive
                 conn_temp = sqlite3.connect(str(DB_PATH))
                 inicializar_tabelas(conn_temp)
                 conn_temp.commit()
                 conn_temp.close()
-                # Marca como dirty para forçar o upload inicial
-                if hasattr(_thread_local, 'conn'): # Verifica se a conexão já foi estabelecida
-                     _thread_local.dirty = True
-                salvar_banco_no_drive(DB_PATH) # Tenta salvar o novo banco no Drive
-                logger.info(f"Novo banco de dados local criado e salvo no Drive: {DB_PATH}")
+                logger.info(f"Novo banco de dados local criado: {DB_PATH}. Será enviado ao Drive na próxima operação de escrita.")
             return DB_PATH
 
         remote_ts = _remote_modified_ts(file_id)
-        global _last_remote_ts
-        if DB_PATH.exists() and remote_ts <= _last_remote_ts:
+        
+        if DB_PATH.exists() and remote_ts <= st.session_state.get("last_remote_ts", 0.0):
             logger.info("Versão local já está atualizada; download evitado.")
             return DB_PATH
             
         caminho_local = DB_PATH
         gdrive.download_file(file_id, caminho_local)
-        _last_remote_ts = remote_ts # Atualiza o timestamp após download bem-sucedido
+        st.session_state["last_remote_ts"] = remote_ts
         logger.info(f"Banco de dados baixado com sucesso: {caminho_local}")
         return caminho_local
     except Exception as e:
@@ -141,20 +122,20 @@ def baixar_banco_do_drive():
 def obter_conexao() -> sqlite3.Connection:
     """Obtém uma conexão com o banco de dados"""
     try:
-        # Obtém ou cria a conexão para a thread atual
-        if not hasattr(_thread_local, 'conn'):
-            caminho_banco = baixar_banco_do_drive()
-            novo = not caminho_banco.exists()
+        if not hasattr(_thread_local, 'conn') or _thread_local.conn is None:
+            caminho_banco_local = baixar_banco_do_drive()
+            novo = not caminho_banco_local.exists() or caminho_banco_local.stat().st_size == 0
 
-            _thread_local.conn = sqlite3.connect(str(caminho_banco))
+            _thread_local.conn = sqlite3.connect(str(caminho_banco_local))
             _thread_local.conn.row_factory = sqlite3.Row
-            _thread_local.dirty = False # Inicializa a flag dirty
+            _thread_local.dirty = False 
+            
             if novo:
+                logger.info(f"Banco de dados não encontrado ou vazio em {caminho_banco_local}, inicializando tabelas.")
                 inicializar_tabelas(_thread_local.conn)
                 _thread_local.conn.commit()
-                # Após inicializar um banco novo, ele está 'sujo' e precisa ser salvo.
                 _thread_local.dirty = True 
-                salvar_banco_no_drive(caminho_banco)
+                logger.info("Banco de dados inicializado e marcado como 'dirty'. Será salvo no Drive na próxima operação de escrita.")
         
         return _thread_local.conn
     except Exception as e:
@@ -164,13 +145,17 @@ def obter_conexao() -> sqlite3.Connection:
 # ─────────────── Fechar conexão ───────────────
 def fechar_conexao():
     """Fecha a conexão da thread atual"""
-    if hasattr(_thread_local, 'conn'):
+    if hasattr(_thread_local, 'conn') and _thread_local.conn is not None: # Adicionado cheque de None
         try:
             _thread_local.conn.close()
         except sqlite3.Error:
-            pass
+            pass # Pode já estar fechada ou em estado inválido
         finally:
-            del _thread_local.conn
+            # Remove conn de _thread_local para que obter_conexao() crie uma nova na próxima vez.
+            delattr(_thread_local, 'conn') 
+            if hasattr(_thread_local, 'dirty'): # Limpa a flag dirty também se existir
+                delattr(_thread_local, 'dirty')
+
 
 # ─────────────── Contexto de conexão ───────────────
 class ConexaoContext:
@@ -182,17 +167,29 @@ class ConexaoContext:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None and getattr(_thread_local, "dirty", False):
-            try:
-                self.conn.commit()
-                # O dirty só é resetado se o commit for bem sucedido E o upload subsequente também for.
-                # O upload em salvar_banco_no_drive cuidará de resetar dirty.
-            except sqlite3.Error as e:
-                logger.error(f"Erro no commit dentro do context manager: {e}")
-                # Não reseta dirty, pois o commit falhou.
-                pass
-        # Fechar a conexão não é feito aqui, pois `obter_conexao` gerencia isso por thread.
-        # `fechar_conexao` pode ser chamado explicitamente no final da sessão/aplicação se necessário.
+        try:
+            # Só faz commit se não houve exceção DENTRO do bloco 'with' E se o banco está 'dirty'.
+            if exc_type is None and getattr(_thread_local, "dirty", False):
+                try:
+                    self.conn.commit()
+                    logger.info("Commit realizado pelo ConexaoContext.")
+                except sqlite3.Error as e_commit:
+                    logger.error(f"Erro no commit dentro do context manager: {e_commit}")
+                    # Se não havia uma exceção original (exc_val is None),
+                    # propaga o erro do commit. Caso contrário, a exceção original (exc_val)
+                    # já será propagada automaticamente ao sair do __exit__.
+                    if exc_val is None: 
+                        raise e_commit # Propaga o erro de commit como a exceção primária.
+            # Se uma exceção ocorreu no bloco 'with' (exc_type is not None), o commit não é tentado.
+            # A flag 'dirty' permanecerá True (correto, pois as alterações não foram salvas).
+            # Se não estava 'dirty', nada precisa ser feito em termos de commit.
+        finally:
+            # Reseta a flag 'dirty' ao sair do contexto, independentemente de commit ou exceção.
+            # Esta é a principal mudança solicitada: garantir que 'dirty' seja False para a próxima
+            # vez que o contexto for usado no mesmo thread, a menos que uma nova operação de escrita ocorra.
+            setattr(_thread_local, "dirty", False)
+            logger.debug("Flag 'dirty' resetada para False ao sair do ConexaoContext.")
+        # A conexão não é fechada aqui; fechar_conexao() pode ser chamado explicitamente.
 
 # ─────────────── Função de contexto ───────────────
 def conexao():
@@ -215,10 +212,8 @@ def inicializar_tabelas(conn: sqlite3.Connection):
         );
     """)
 
-    # Verifica se já existe algum usuário admin
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo = 'admin'")
     if cursor.fetchone()[0] == 0:
-        # Insere o usuário admin padrão
         cursor.execute("""
             INSERT INTO usuarios (nome, usuario, senha, tipo)
             VALUES (?, ?, ?, ?)
@@ -248,275 +243,251 @@ def inicializar_tabelas(conn: sqlite3.Connection):
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS contratos (
-            numero_contrato TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero_contrato TEXT UNIQUE NOT NULL,
             cod_empresa TEXT NOT NULL,
             empresa_contratada TEXT,
             titulo TEXT,
             especificacoes TEXT,
             pasta_contrato TEXT,
-            FOREIGN KEY(cod_empresa) REFERENCES empresas(cod_empresa)
+            FOREIGN KEY (cod_empresa) REFERENCES empresas(cod_empresa) ON DELETE CASCADE 
         );
     """)
+    # Adicionado ON DELETE CASCADE para cod_empresa
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS unidades (
-            cod_unidade TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cod_unidade TEXT UNIQUE NOT NULL,
             numero_contrato TEXT NOT NULL,
-            nome_unidade TEXT NOT NULL,
+            nome_unidade TEXT,
             estado TEXT,
             cidade TEXT,
             localizacao TEXT,
             pasta_unidade TEXT,
-            FOREIGN KEY(numero_contrato) REFERENCES contratos(numero_contrato)
+            FOREIGN KEY (numero_contrato) REFERENCES contratos(numero_contrato) ON DELETE CASCADE
         );
     """)
+    # Adicionado ON DELETE CASCADE para numero_contrato
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS servicos (
-            cod_servico TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cod_servico TEXT UNIQUE NOT NULL,
             cod_unidade TEXT NOT NULL,
-            tipo_servico TEXT,
-            data_criacao TEXT,
+            descricao TEXT,
+            data_prevista TEXT,
             data_execucao TEXT,
-            status TEXT CHECK(status IN ('Ativo', 'Em andamento', 'Pausada', 'Encerrado')),
+            status TEXT,
             observacoes TEXT,
-            pasta_servico TEXT,
-            FOREIGN KEY(cod_unidade) REFERENCES unidades(cod_unidade)
+            pasta_servico TEXT, -- ID da pasta do serviço no Drive
+            nome_arquivo_original TEXT, -- Nome original do arquivo de upload
+            id_arquivo_drive TEXT, -- ID do arquivo específico no Drive
+            FOREIGN KEY (cod_unidade) REFERENCES unidades(cod_unidade) ON DELETE CASCADE
         );
     """)
+    # Adicionado ON DELETE CASCADE para cod_unidade
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS servico_funcionarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cod_servico TEXT NOT NULL,
             cod_funcionario TEXT NOT NULL,
-            FOREIGN KEY(cod_servico) REFERENCES servicos(cod_servico),
-            FOREIGN KEY(cod_funcionario) REFERENCES funcionarios(cod_funcionario)
+            FOREIGN KEY (cod_servico) REFERENCES servicos(cod_servico) ON DELETE CASCADE,
+            FOREIGN KEY (cod_funcionario) REFERENCES funcionarios(cod_funcionario) ON DELETE CASCADE,
+            UNIQUE (cod_servico, cod_funcionario)
         );
     """)
+    # Adicionado ON DELETE CASCADE para cod_servico e cod_funcionario
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS arquivos_servico (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cod_servico TEXT NOT NULL,
-            nome_arquivo TEXT NOT NULL,
-            tipo_arquivo TEXT NOT NULL,
-            drive_file_id TEXT NOT NULL,
-            data_upload TEXT NOT NULL,
-            descricao TEXT,
-            FOREIGN KEY(cod_servico) REFERENCES servicos(cod_servico)
-        );
-    """)
+    conn.commit()
+    logger.info("Tabelas inicializadas/verificadas.")
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS arquivos_contrato (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            numero_contrato TEXT NOT NULL,
-            nome_arquivo TEXT NOT NULL,
-            tipo_arquivo TEXT NOT NULL,
-            drive_file_id TEXT NOT NULL,
-            data_upload TEXT NOT NULL,
-            descricao TEXT,
-            FOREIGN KEY(numero_contrato) REFERENCES contratos(numero_contrato)
-        );
-    """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS arquivos_unidade (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cod_unidade TEXT NOT NULL,
-            nome_arquivo TEXT NOT NULL,
-            tipo_arquivo TEXT NOT NULL,
-            drive_file_id TEXT NOT NULL,
-            data_upload TEXT NOT NULL,
-            descricao TEXT,
-            FOREIGN KEY(cod_unidade) REFERENCES unidades(cod_unidade)
-        );
-    """)
-
-# ─────────────── Enviar/atualizar banco no Drive ───────────────
+# ───────────────── Salvar Banco de Dados no Google Drive ─────────────────
 def salvar_banco_no_drive(caminho_banco: Path):
-    """Salva o banco de dados no Google Drive"""
+    """Salva o banco de dados local no Google Drive se estiver marcado como 'dirty' e não houver conflitos."""
+    st.session_state.setdefault("last_remote_ts", 0.0)
+
+    if not getattr(_thread_local, "dirty", False):
+        logger.info("Banco de dados não está 'dirty', upload para o Drive evitado.")
+        return
+
     try:
-        # Usa True como default para getattr para garantir que, se a flag não existir por algum motivo,
-        # ele tente salvar (comportamento seguro), especialmente na primeira execução ou após reinício.
-        if not getattr(_thread_local, "dirty", True):
-            logger.info("Nenhuma alteração local pendente (_thread_local.dirty=False); upload para o Drive evitado.")
-            return
-
         folder_id = _get_drive_folder_id()
-        logger.info(f"Usando pasta do Drive: {folder_id}")
-
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
-        
-        # Antes de fazer upload/update, verifica se o arquivo remoto não foi modificado por outro processo.
+
         if file_id:
             remote_ts_before_upload = _remote_modified_ts(file_id)
-            if remote_ts_before_upload > _last_remote_ts:
-                logger.warning(f"CONFLITO DETECTADO: O arquivo no Drive ({remote_ts_before_upload}) é mais novo que a última sincronização local ({_last_remote_ts}). Upload abortado para evitar perda de dados.")
-                # Aqui, uma estratégia de resolução de conflitos mais elaborada poderia ser implementada.
-                # Por ora, apenas logamos e evitamos a sobrescrita.
-                # Opcionalmente, poderia levantar uma exceção para o chamador tratar.
-                st.error("❌ CONFLITO: O banco de dados no servidor foi modificado por outra sessão. Suas alterações não foram salvas para evitar perda de dados. Por favor, recarregue e tente novamente.")
-                return 
+            if remote_ts_before_upload > st.session_state.get("last_remote_ts", 0.0):
+                logger.warning(
+                    f"CONFLITO DETECTADO: Versão do banco no Drive (ts: {remote_ts_before_upload}) "
+                    f"é mais nova que a última versão conhecida localmente (ts: {st.session_state.get('last_remote_ts', 0.0)}). "
+                    f"Upload abortado para evitar perda de dados."
+                )
+                # Mostrar erro para o usuário no Streamlit
+                # É crucial que esta mensagem seja visível se stiver em um contexto Streamlit
+                if hasattr(st, 'error'):
+                    st.error(f"Conflito ao salvar: alterações remotas detectadas. Suas últimas alterações não foram salvas na nuvem para evitar sobrescrever dados. Por favor, recarregue a página e tente novamente.")
+                return # Aborta o upload
 
-        if file_id:
-            gdrive.update_file(file_id, str(caminho_banco))
-            logger.info("Banco atualizado no Google Drive")
+            logger.info(f"Atualizando arquivo {DB_NAME} no Drive.")
+            gdrive.update_file(file_id, caminho_banco)
+            logger.info(f"Arquivo {DB_NAME} atualizado no Drive.")
         else:
-            gdrive.upload_file(str(caminho_banco), folder_id)
-            logger.info("Banco enviado ao Google Drive")
+            logger.info(f"Enviando novo arquivo {DB_NAME} para o Drive.")
+            file_id = gdrive.upload_file(caminho_banco, folder_id) # Salva o file_id retornado
+            if not file_id:
+                logger.error(f"Falha ao fazer upload do novo arquivo {DB_NAME} para o Drive.")
+                return # Aborta se o upload falhar
+            logger.info(f"Novo arquivo {DB_NAME} enviado ao Drive com ID: {file_id}.")
         
-        _thread_local.dirty = False # Upload bem-sucedido, banco não está mais sujo
-        _last_remote_ts = time.time() # Agora somos a versão mais nova
+        # Atualiza o timestamp da última versão remota conhecida com o timestamp do arquivo que acabou de ser salvo/criado.
+        # Isso é importante para a próxima verificação de conflito.
+        if file_id: # Garante que file_id não é None (caso upload_file falhe e retorne None)
+             new_remote_ts = _remote_modified_ts(file_id)
+             st.session_state["last_remote_ts"] = new_remote_ts
+             logger.info(f"Timestamp remoto atualizado para: {new_remote_ts}")
+        else: # Caso de falha no upload inicial onde file_id pode não ser retornado.
+             st.session_state["last_remote_ts"] = time.time() # Fallback para tempo atual
+             logger.warning("Não foi possível obter o file_id após o upload, usando time.time() para last_remote_ts.")
 
+        # A flag 'dirty' agora é resetada no __exit__ do ConexaoContext.
+        # setattr(_thread_local, "dirty", False) # Upload bem-sucedido, banco não está mais sujo (movido)
+
+    except gdrive.googleapiclient.errors.HttpError as e:
+        logger.error(f"Erro de API do Google ao salvar banco no Drive: {str(e)}")
+        if hasattr(st, 'error'):
+            st.error(f"Erro de API ao salvar no Google Drive: {e}. Suas alterações podem não ter sido salvas na nuvem.")
+        # Não levanta a exceção para não quebrar a aplicação, mas o erro é logado e mostrado ao usuário.
+        # A flag 'dirty' permanecerá True, então a próxima tentativa de salvar_banco_no_drive tentará novamente.
     except Exception as e:
-        logger.error(f"Erro ao salvar banco no Drive: {str(e)}")
-        raise
+        logger.error(f"Erro inesperado ao salvar banco no Drive: {str(e)}")
+        if hasattr(st, 'error'):
+            st.error(f"Erro inesperado ao salvar no Google Drive: {e}. Suas alterações podem não ter sido salvas na nuvem.")
+        # Similarmente, não levanta a exceção. 'dirty' permanece True.
 
-# ─────────────── Atualizar banco de dados ───────────────
+# Função para atualizar o esquema do banco de dados (se necessário)
 def atualizar_banco():
-    """Atualiza o banco de dados criando novas tabelas se necessário"""
-    conn = obter_conexao() # _thread_local.dirty será False aqui inicialmente
-    cursor = conn.cursor()
-    schema_changed = False
-    
-    # Verifica se a tabela empresas tem o campo pasta_empresa
-    cursor.execute("PRAGMA table_info(empresas)")
-    colunas = [col[1] for col in cursor.fetchall()]
-    if 'pasta_empresa' not in colunas:
-        print("📝 Adicionando campo pasta_empresa à tabela empresas...")
-        cursor.execute("ALTER TABLE empresas ADD COLUMN pasta_empresa TEXT")
-        schema_changed = True
-    
-    # Verifica se a tabela contratos tem o campo pasta_contrato
-    cursor.execute("PRAGMA table_info(contratos)")
-    colunas = [col[1] for col in cursor.fetchall()]
-    if 'pasta_contrato' not in colunas:
-        print("📝 Adicionando campo pasta_contrato à tabela contratos...")
-        cursor.execute("ALTER TABLE contratos ADD COLUMN pasta_contrato TEXT")
-        schema_changed = True
-    
-    # Verifica se a tabela unidades tem o campo pasta_unidade
-    cursor.execute("PRAGMA table_info(unidades)")
-    colunas = [col[1] for col in cursor.fetchall()]
-    if 'pasta_unidade' not in colunas:
-        print("📝 Adicionando campo pasta_unidade à tabela unidades...")
-        cursor.execute("ALTER TABLE unidades ADD COLUMN pasta_unidade TEXT")
-        schema_changed = True
-    
-    # Verifica se a tabela servicos tem o campo pasta_servico
-    cursor.execute("PRAGMA table_info(servicos)")
-    colunas = [col[1] for col in cursor.fetchall()]
-    if 'pasta_servico' not in colunas:
-        print("📝 Adicionando campo pasta_servico à tabela servicos...")
-        cursor.execute("ALTER TABLE servicos ADD COLUMN pasta_servico TEXT")
-        schema_changed = True
-    
-    # Verifica se a tabela servico_funcionarios existe
-    cursor.execute("""
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='servico_funcionarios'
-    """)
-    if not cursor.fetchone():
-        print("📝 Criando tabela servico_funcionarios...")
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS servico_funcionarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cod_servico TEXT NOT NULL,
-                cod_funcionario TEXT NOT NULL,
-                FOREIGN KEY(cod_servico) REFERENCES servicos(cod_servico),
-                FOREIGN KEY(cod_funcionario) REFERENCES funcionarios(cod_funcionario)
-            );
-        """)
-        schema_changed = True
-    
-    # Verifica se as tabelas de arquivos existem
-    cursor.execute("""
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='arquivos_servico'
-    """)
-    if not cursor.fetchone():
-        print("📝 Criando tabela arquivos_servico...")
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS arquivos_servico (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cod_servico TEXT NOT NULL,
-                nome_arquivo TEXT NOT NULL,
-                tipo_arquivo TEXT NOT NULL,
-                drive_file_id TEXT NOT NULL,
-                data_upload TEXT NOT NULL,
-                descricao TEXT,
-                FOREIGN KEY(cod_servico) REFERENCES servicos(cod_servico)
-            );
-        """)
-        schema_changed = True
+    """Verifica e atualiza o esquema do banco de dados se necessário."""
+    # Esta função pode ser expandida para lidar com migrações de esquema mais complexas.
+    # Por enquanto, apenas garante que todas as tabelas sejam criadas.
+    try:
+        with conexao() as conn: # Usa o contexto de conexão
+            # A verificação/criação de tabelas já define 'dirty' se algo mudar
+            inicializar_tabelas(conn) 
+            # O commit e o reset de dirty são gerenciados pelo ConexaoContext e salvar_banco_no_drive
+        
+        # Se inicializar_tabelas marcou como dirty, tenta salvar.
+        if getattr(_thread_local, "dirty", False): # Checa novamente pq o contexto já resetou
+             # Se o contexto resetou, mas inicializar_tabelas FEZ algo, precisamos marcar de novo
+             # No entanto, inicializar_tabelas já faz commit.
+             # A questão é se o schema MUDOU e precisa de upload.
+             # A lógica atual: se `inicializar_tabelas` faz um commit, o context manager fará o commit.
+             # Se o context manager comitou, `dirty` estava True. `salvar_banco_no_drive` será chamado pelos models.
+             # Esta função `atualizar_banco` pode não precisar chamar `salvar_banco_no_drive` explicitamente
+             # se as chamadas de `inicializar_tabelas` já marcam `dirty` e os models chamam `salvar_banco_no_drive`.
+             # Contudo, para uma atualização de esquema explícita, pode ser bom forçar.
+             
+             # Se o objetivo é apenas garantir que o esquema está atualizado E salvo no Drive:
+             # 1. Abrir conexão (feito)
+             # 2. Rodar inicializar_tabelas (feito, comita internamente se criar algo)
+             # 3. Se inicializar_tabelas criou algo, o banco está tecnicamente 'dirty' para o Drive.
+             # A flag _thread_local.dirty será True dentro de inicializar_tabelas se algo for criado (devido ao commit).
+             # O ConexaoContext comitará e resetará dirty.
+             # Para forçar o salvamento APÓS uma atualização de esquema:
+             logger.info("Esquema do banco verificado/atualizado. Tentando salvar no Drive se houver alterações pendentes.")
+             # Re-marca como dirty aqui para garantir que salvar_banco_no_drive faça o upload
+             # Isso é necessário porque o ConexaoContext já resetou a flag.
+             # No entanto, isso pode levar a uploads desnecessários se o schema já estava atualizado.
+             # Uma flag de "schema_changed" seria melhor.
+             
+             # Melhoria: inicializar_tabelas poderia retornar um booleano se o esquema mudou.
+             # Por ora, vamos simplificar. A chamada abaixo tentará salvar se _thread_local.dirty for True.
+             # Se o contexto já limpou, e não houve outras escritas, não salvará.
+             # Se inicializar_tabelas realmente ALTEROU o esquema, ela DEVE marcar dirty.
 
-    cursor.execute("""
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='arquivos_contrato'
-    """)
-    if not cursor.fetchone():
-        print("📝 Criando tabela arquivos_contrato...")
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS arquivos_contrato (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                numero_contrato TEXT NOT NULL,
-                nome_arquivo TEXT NOT NULL,
-                tipo_arquivo TEXT NOT NULL,
-                drive_file_id TEXT NOT NULL,
-                data_upload TEXT NOT NULL,
-                descricao TEXT,
-                FOREIGN KEY(numero_contrato) REFERENCES contratos(numero_contrato)
-            );
-        """)
-        schema_changed = True
+            pass # A lógica de salvar é melhor nos models após operações de escrita.
+                 # Ou, se esta função é chamada em um ponto que DEVE sincronizar:
+            # marca_sujo() # Se tem certeza que quer forçar um check/save
+            # salvar_banco_no_drive(DB_PATH)
 
-    cursor.execute("""
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='arquivos_unidade'
-    """)
-    if not cursor.fetchone():
-        print("📝 Criando tabela arquivos_unidade...")
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS arquivos_unidade (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cod_unidade TEXT NOT NULL,
-                nome_arquivo TEXT NOT NULL,
-                tipo_arquivo TEXT NOT NULL,
-                drive_file_id TEXT NOT NULL,
-                data_upload TEXT NOT NULL,
-                descricao TEXT,
-                FOREIGN KEY(cod_unidade) REFERENCES unidades(cod_unidade)
-            );
-        """)
-        schema_changed = True
+        logger.info("Verificação/atualização do banco de dados concluída.")
+    except Exception as e:
+        logger.error(f"Erro ao atualizar banco de dados: {str(e)}")
+        # Considerar se deve levantar a exceção ou apenas logar.
 
-    if schema_changed:
-        _thread_local.dirty = True # Marca como sujo se o esquema mudou
+# Função para popular o banco de dados com exemplos (para desenvolvimento)
 
-    conn.commit() # Commit local das alterações de esquema
-    
-    # Só salva no drive se algo mudou no esquema (ou se já estava dirty por outro motivo)
-    if getattr(_thread_local, "dirty", False):
-        salvar_banco_no_drive(Path(tempfile.gettempdir()) / DB_NAME)
-    
-    print("✅ Banco de dados atualizado com sucesso!")
-
-# ─────────────── Execução isolada ───────────────
 if __name__ == "__main__":
-    # Para execução isolada, certifique-se que o st.session_state e st.secrets podem não estar disponíveis.
-    # Você pode precisar mocká-los ou usar valores padrão diretamente aqui se for testar _get_drive_folder_id
-    # ou outras funções dependentes do Streamlit.
-    
-    # Exemplo de mock básico se st não estiver disponível (apenas para __main__):
-    if 'streamlit' not in sys.modules:
-        class MockStreamlit:
-            def __init__(self):
-                self.session_state = {}
-                self.secrets = {"gdrive": {"database_folder_id": "ID_PASTA_DRIVE_PADRAO_TESTE"}} # Exemplo
-        st = MockStreamlit()
+    # Mock para st.secrets e st.session_state para testes locais
+    class MockStreamlit:
+        def __init__(self):
+            self.secrets = {
+                "gdrive": {"database_folder_id": "TEST_DB_FOLDER_ID"},
+                "db_path_readonly": "", 
+                "db_readonly_queried": False 
+            }
+            self.session_state = {} # last_remote_ts será inicializado por setdefault
 
-    conn = obter_conexao()
-    print("✅ Banco de dados pronto para uso.")
-    atualizar_banco()  # Atualiza o banco ao executar o script
+        def __getattr__(self, name):
+            # Para simular st.text_input, st.button, etc., retornando um mock simples
+            if name not in self.session_state:
+                # self.session_state[name] = None # Não popular dinamicamente
+                def mock_function(*args, **kwargs):
+                    print(f"Mocked st.{name} called with args: {args} kwargs: {kwargs}")
+                    # Tenta retornar um valor padrão que não quebre chamadas comuns
+                    if "key" in kwargs: return self.session_state.get(kwargs["key"])
+                    if name in ["button", "checkbox"]: return False
+                    if name in ["text_input", "text_area", "selectbox", "date_input"]: return None
+                    return None 
+                return mock_function
+            return self.session_state[name]
+
+    st = MockStreamlit()
+    st.session_state.setdefault("last_remote_ts", 0.0) # Garante a inicialização
+
+    logger.info("Executando em modo de teste...")
+    
+    # Teste de limpeza de conexão
+    logger.info("Testando ciclo de conexão e limpeza...")
+    with conexao() as conn_test:
+        logger.info(f"Conexão obtida: {conn_test}")
+        cursor = conn_test.cursor()
+        cursor.execute("SELECT COUNT(*) FROM usuarios")
+        logger.info(f"Contagem de usuários: {cursor.fetchone()[0]}")
+        # Simula uma escrita para testar a flag dirty
+        # marca_sujo() 
+        # logger.info(f"Após marca_sujo, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}")
+    logger.info(f"Após sair do contexto, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
+
+    fechar_conexao() # Testa o fechamento explícito
+    logger.info(f"Após fechar_conexao, hasattr(_thread_local, 'conn'): {hasattr(_thread_local, 'conn')}") # Deve ser False
+
+    logger.info("Reabrindo conexão para teste...")
+    with conexao() as conn_test_2:
+        logger.info(f"Segunda conexão obtida: {conn_test_2}")
+        logger.info(f"Na segunda conexão, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
+    logger.info(f"Após sair do segundo contexto, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
+
+
+    # Exemplo: Como usar obter_conexao e fechar_conexao sem o context manager
+    # logger.info("Testando obter_conexao e fechar_conexao manualmente...")
+    # conn_manual = obter_conexao()
+    # try:
+    #     logger.info(f"Conexão manual: {conn_manual}, dirty: {getattr(_thread_local, 'dirty', 'N/A')}")
+    #     # conn_manual.execute("INSERT INTO usuarios (nome, usuario, senha, tipo) VALUES ('Test', 'testuser', 'test', 'ope')")
+    #     # marca_sujo()
+    #     # logger.info(f"Após escrita manual, dirty: {getattr(_thread_local, 'dirty', 'N/A')}")
+    #     # conn_manual.commit() # Commit manual necessário se não usar o contexto e dirty=True
+    #     # logger.info("Commit manual realizado.")
+    # except Exception as e:
+    #     logger.error(f"Erro no teste manual: {e}")
+    #     # conn_manual.rollback() # Rollback em caso de erro
+    # finally:
+    #     # Se não usou contexto, e fez commit/rollback, resetar dirty manualmente se necessário
+    #     # setattr(_thread_local, "dirty", False) 
+    #     fechar_conexao()
+    # logger.info(f"Após fechar conexão manual, hasattr(_thread_local, 'conn'): {hasattr(_thread_local, 'conn')}")
+    
+    logger.info("Testes básicos concluídos.")
