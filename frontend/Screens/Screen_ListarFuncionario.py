@@ -29,11 +29,11 @@ def exibir_tela_listar_funcionarios():
         st.info("Nenhum funcionário cadastrado.")
     else:
         for f in funcionarios:
-            with st.expander(f"👷 {f[1]} - {f[5]}"):
-                st.markdown(f"**Nascimento:** {f[2]}")
-                st.markdown(f"**CPF:** {f[3]}")
-                st.markdown(f"**Código:** {f[4]}")
-                st.markdown(f"**Função:** {f[5]}")
+            with st.expander(f"👷 {f[1]} - {f[4]}"):
+                st.markdown(f"**Nascimento:** {f[3]}")
+                st.markdown(f"**CPF:** {f[2]}")
+                st.markdown(f"**Código:** {f[0]}")
+                st.markdown(f"**Função:** {f[4]}")
 
                 col1, col2 = st.columns([1, 1])
 
@@ -56,36 +56,33 @@ def exibir_tela_listar_funcionarios():
         f = st.session_state["editando_funcionario"]
 
         with st.form("form_edicao_func"):
-            nome = st.text_input("Nome completo", value=f[1])
+            nome_edit = st.text_input("Nome completo", value=f[1])
             
-            # Data de nascimento com range amplo
             min_date = datetime.date(1900, 1, 1)
             max_date = datetime.date.today()
-            data_nascimento = datetime.datetime.strptime(f[2], "%Y-%m-%d").date()
-            nascimento = st.date_input(
+            data_nascimento_val = datetime.datetime.strptime(f[3], "%Y-%m-%d").date() if f[3] else None
+            nascimento_edit = st.date_input(
                 "Data de nascimento",
                 min_value=min_date,
                 max_value=max_date,
-                value=data_nascimento
+                value=data_nascimento_val
             )
             
-            cpf = st.text_input("CPF", value=f[3])
-            cod_func = st.text_input("Código do Funcionário", value=f[4])
-            funcao = st.text_input("Função", value=f[5])
+            cpf_edit = st.text_input("CPF", value=f[2])
+            cod_func_edit = st.text_input("Código do Funcionário", value=f[0], disabled=True)
+            funcao_edit = st.text_input("Função", value=f[4])
 
             enviado = st.form_submit_button("Salvar alterações")
 
             if enviado:
-                # Converte a data para string no formato YYYY-MM-DD
-                data_nascimento = nascimento.strftime("%Y-%m-%d")
+                data_nascimento_str = nascimento_edit.strftime("%Y-%m-%d") if nascimento_edit else None
                 
                 sucesso = model_funcionario.atualizar_funcionario(
-                    func_id=f[0],
-                    nome=nome,
-                    data_nascimento=data_nascimento,
-                    cpf=cpf,
-                    cod_funcionario=cod_func,
-                    funcao=funcao
+                    cod_funcionario_original=f[0],
+                    novo_nome=nome_edit,
+                    nova_data_nascimento=data_nascimento_str,
+                    novo_cpf=cpf_edit,
+                    nova_funcao=funcao_edit
                 )
                 if sucesso:
                     st.success("Funcionário atualizado com sucesso!")
