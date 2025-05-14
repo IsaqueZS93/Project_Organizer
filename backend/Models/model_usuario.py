@@ -1,154 +1,171 @@
 # backend/Models/model_usuario.py
+# -----------------------------------------------------------------------------
+#  Camada de acesso a dados – Usuários
+#  • Filtros flexíveis em listar_usuarios(nome_like, tipos, limit, offset)
+#  • Helper _sync_after_write → centraliza commit + upload Drive
+#  • Sem sys.path hacks (projeto deve estar configurado como pacote)
+#  • Todas as senhas ainda são armazenadas em texto puro (hash em etapa futura)
+# -----------------------------------------------------------------------------
 
-import sqlite3
-from typing import List, Optional, Tuple
-from pathlib import Path
-import sys
+from __future__ import annotations
+
 import logging
-
-# Adiciona o caminho para importar o gerenciador do banco
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from Database.db_gestaodecontratos import obter_conexao, salvar_banco_no_drive, DB_NAME
-
+import sqlite3
+from pathlib import Path
 from tempfile import gettempdir
+from typing import List, Optional, Sequence, Tuple
 
-# Configuração de logging
-logging.basicConfig(level=logging.INFO)
+from Database.db_gestaodecontratos import (
+    DB_NAME,
+    obter_conexao,
+    salvar_banco_no_drive,
+)
+
 logger = logging.getLogger(__name__)
 
-# ───────────────── Funções CRUD para a tabela de usuários ─────────────────
+# -----------------------------------------------------------------------------
+#  Utilitário interno -----------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def criar_usuario(nome: str, data_nascimento: str, funcao: str, usuario: str, senha: str, tipo: str) -> bool:
+def _sync_after_write(conn: sqlite3.Connection) -> bool:
+    """Commit + tentativa de upload do banco. Retorna True se commit ok."""
     try:
-        # Primeiro verifica se o usuário já existe
+        conn.commit()
+        caminho_banco = Path(gettempdir()) / DB_NAME
+        salvar_banco_no_drive(caminho_banco)  # já faz tratamento de conflito
+        return True
+    except Exception as e:
+        logger.error("Erro no commit/sync Drive: %s", e)
+        return False
+
+# -----------------------------------------------------------------------------
+#  CRUD ------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+
+def criar_usuario(
+    nome: str,
+    data_nascimento: str,
+    funcao: str,
+    usuario: str,
+    senha: str,
+    tipo: str,
+) -> bool:
+    try:
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM usuarios WHERE usuario = ?", (usuario,))
-            if cursor.fetchone():
-                logger.warning(f"Tentativa de criar usuário duplicado: {usuario}")
+            cur = conn.cursor()
+            if cur.execute("SELECT 1 FROM usuarios WHERE usuario = ?", (usuario,)).fetchone():
+                logger.warning("Usuário duplicado: %s", usuario)
                 return False
 
-            # Se não existe, cria o novo usuário
-            cursor.execute("""
+            cur.execute(
+                """
                 INSERT INTO usuarios (nome, data_nascimento, funcao, usuario, senha, tipo)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (nome, data_nascimento, funcao, usuario, senha, tipo))
-            
-            # Força o commit
-            conn.commit()
-            
-            # Salva no Drive
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            try:
-                salvar_banco_no_drive(caminho_banco)
-                logger.info(f"Usuário {usuario} criado com sucesso")
-                return True
-            except Exception as e:
-                logger.error(f"Erro ao salvar banco no Drive: {e}")
-                # Mesmo com erro no Drive, o usuário foi criado localmente
-                return True
-                
+                VALUES (?,?,?,?,?,?)
+                """,
+                (nome, data_nascimento, funcao, usuario, senha, tipo),
+            )
+            return _sync_after_write(conn)
     except Exception as e:
-        logger.error(f"Erro ao criar usuário: {e}")
+        logger.error("Erro ao criar usuário: %s", e)
         return False
 
 
-def listar_usuarios() -> List[Tuple]:
+def listar_usuarios(
+    nome_like: str | None = None,
+    tipos: Sequence[str] | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> List[Tuple]:
+    """Retorna lista [(id,nome,usuario,tipo,funcao,senha,data_nascimento)]."""
+
+    sql = "SELECT id, nome, usuario, tipo, funcao, senha, data_nascimento FROM usuarios WHERE 1=1"
+    params: list[str] = []
+
+    if nome_like:
+        sql += " AND nome LIKE ?"
+        params.append(f"%{nome_like}%")
+    if tipos:
+        sql += f" AND tipo IN ({','.join('?' * len(tipos))})"
+        params.extend(tipos)
+    sql += " ORDER BY nome"
+
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+        if offset is not None:
+            sql += " OFFSET ?"
+            params.append(offset)
+
     try:
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, nome, usuario, tipo, funcao FROM usuarios")
-            return cursor.fetchall()
+            cur = conn.cursor()
+            return cur.execute(sql, params).fetchall()
     except Exception as e:
-        logger.error(f"Erro ao listar usuários: {e}")
+        logger.error("Erro ao listar usuários: %s", e)
         return []
 
 
 def buscar_usuario_por_id(usuario_id: int) -> Optional[Tuple]:
     try:
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,))
-            return cursor.fetchone()
+            cur = conn.cursor()
+            return cur.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
     except Exception as e:
-        logger.error(f"Erro ao buscar usuário: {e}")
+        logger.error("Erro buscar usuário: %s", e)
         return None
 
 
-def atualizar_usuario(usuario_id: int, nome: str, data_nascimento: str, funcao: str, usuario: str, senha: str, tipo: str) -> bool:
+def atualizar_usuario(
+    usuario_id: int,
+    nome: str,
+    data_nascimento: str,
+    funcao: str,
+    usuario: str,
+    senha: str,
+    tipo: str,
+) -> bool:
     try:
-        # Primeiro verifica se o novo nome de usuário já existe (exceto para o próprio usuário)
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM usuarios 
-                WHERE usuario = ? AND id != ?
-            """, (usuario, usuario_id))
-            
-            if cursor.fetchone():
-                logger.warning(f"Tentativa de atualizar para um nome de usuário já existente: {usuario}")
+            cur = conn.cursor()
+            if cur.execute(
+                "SELECT 1 FROM usuarios WHERE usuario = ? AND id != ?",
+                (usuario, usuario_id),
+            ).fetchone():
+                logger.warning("Login já existe: %s", usuario)
                 return False
 
-            # Atualiza o usuário
-            cursor.execute("""
+            cur.execute(
+                """
                 UPDATE usuarios
-                SET nome = ?, data_nascimento = ?, funcao = ?, usuario = ?, senha = ?, tipo = ?
-                WHERE id = ?
-            """, (nome, data_nascimento, funcao, usuario, senha, tipo, usuario_id))
-            
-            # Força o commit
-            conn.commit()
-            
-            # Salva no Drive
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            try:
-                salvar_banco_no_drive(caminho_banco)
-                logger.info(f"Usuário {usuario} atualizado com sucesso")
-                return True
-            except Exception as e:
-                logger.error(f"Erro ao salvar banco no Drive: {e}")
-                # Mesmo com erro no Drive, o usuário foi atualizado localmente
-                return True
-                
+                SET nome=?, data_nascimento=?, funcao=?, usuario=?, senha=?, tipo=?
+                WHERE id=?
+                """,
+                (nome, data_nascimento, funcao, usuario, senha, tipo, usuario_id),
+            )
+            return _sync_after_write(conn)
     except Exception as e:
-        logger.error(f"Erro ao atualizar usuário: {e}")
+        logger.error("Erro atualizar usuário: %s", e)
         return False
 
 
 def deletar_usuario(usuario_id: int) -> bool:
     try:
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
-            
-            # Força o commit
-            conn.commit()
-
-            # Salva no Drive
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            try:
-                salvar_banco_no_drive(caminho_banco)
-                logger.info(f"Usuário {usuario_id} deletado com sucesso")
-                return True
-            except Exception as e:
-                logger.error(f"Erro ao salvar banco no Drive: {e}")
-                # Mesmo com erro no Drive, o usuário foi deletado localmente
-                return True
-                
+            conn.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
+            return _sync_after_write(conn)
     except Exception as e:
-        logger.error(f"Erro ao deletar usuário: {e}")
+        logger.error("Erro deletar usuário: %s", e)
         return False
 
 
 def autenticar_usuario(usuario: str, senha: str) -> Optional[Tuple]:
     try:
         with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, nome, tipo FROM usuarios
-                WHERE usuario = ? AND senha = ?
-            """, (usuario, senha))
-            return cursor.fetchone()
+            cur = conn.cursor()
+            return cur.execute(
+                "SELECT id, nome, tipo FROM usuarios WHERE usuario=? AND senha=?",
+                (usuario, senha),
+            ).fetchone()
     except Exception as e:
-        logger.error(f"Erro ao autenticar usuário: {e}")
+        logger.error("Erro autenticar usuário: %s", e)
         return None
