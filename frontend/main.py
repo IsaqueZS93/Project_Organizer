@@ -1,100 +1,107 @@
+# frontend/app.py
+# ------------------------------------------------------------------------------
+#  Sistema de Gestão – App principal (Streamlit)
+#  • Imports tardios para reduzir tempo de carregamento
+#  • Navegação sem st.rerun() desnecessário
+#  • Estado padronizado em st.session_state
+# ------------------------------------------------------------------------------
+
 import streamlit as st
-from pathlib import Path
-import sys
-from Screens.Screen_Login import exibir_tela_login
-from Screens.Screen_Empresas import exibir_tela_empresas
-from Screens.Screen_Contratos import exibir_tela_contratos
-from Screens.Screen_Unidades import exibir_tela_unidades
-from Screens.Screen_Servicos import exibir_tela_servicos
-from Screens.Screen_ServicosOPE import exibir_tela_servicos_ope
-from Screens.Screen_Usuarios import exibir_tela_usuarios
-from Screens.Screen_GridPastas import exibir_tela_grid_pastas
-from Screens.Screen_Backup import exibir_tela_backup
+import importlib
 
-# Configuração da página
-st.set_page_config(
-    page_title="Sistema de Gestão",
-    page_icon="🏢",
-    layout="wide"
-)
+# ------------------------------------------------------------------------------
+# 1. Configurações básicas da página
+# ------------------------------------------------------------------------------
+st.set_page_config(page_title="Sistema de Gestão", page_icon="🏢", layout="wide")
 
-# Inicializa variáveis de sessão
-if "usuario" not in st.session_state:
-    st.session_state["usuario"] = None
-if "tipo" not in st.session_state:
-    st.session_state["tipo"] = None
-if "pagina" not in st.session_state:
-    st.session_state["pagina"] = "empresas"
+# ------------------------------------------------------------------------------
+# 2. Estado inicial
+# ------------------------------------------------------------------------------
+DEFAULTS = {"usuario": None, "tipo": None, "pagina": "empresas"}
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
 
-# Menu lateral
+# ------------------------------------------------------------------------------
+# 3. Mapeamento de telas (módulo, função)
+# ------------------------------------------------------------------------------
+TELAS = {
+    "login":        ("Screens.Screen_Login",        "exibir_tela_login"),
+    "empresas":     ("Screens.Screen_Empresas",     "exibir_tela_empresas"),
+    "contratos":    ("Screens.Screen_Contratos",    "exibir_tela_contratos"),
+    "unidades":     ("Screens.Screen_Unidades",     "exibir_tela_unidades"),
+    "servicos":     ("Screens.Screen_Servicos",     "exibir_tela_servicos"),
+    "servicos_ope": ("Screens.Screen_ServicosOPE",  "exibir_tela_servicos_ope"),
+    "usuarios":     ("Screens.Screen_Usuarios",     "exibir_tela_usuarios"),
+    "pastas":       ("Screens.Screen_GridPastas",   "exibir_tela_grid_pastas"),
+    "backup":       ("Screens.Screen_Backup",       "exibir_tela_backup"),
+}
+
+# ------------------------------------------------------------------------------
+# 4. Função auxiliar de carregamento tardio
+# ------------------------------------------------------------------------------
+
+def carregar_tela(nome: str):
+    """Importa o módulo e executa a função da tela solicitada."""
+    modulo, funcao = TELAS[nome]
+    mod = importlib.import_module(modulo)
+    getattr(mod, funcao)()
+
+# ------------------------------------------------------------------------------
+# 5. Construção do menu lateral
+# ------------------------------------------------------------------------------
 with st.sidebar:
     st.title("🏢 Sistema de Gestão")
-    
+
+    # Usuário autenticado -------------------------------------------------------
     if st.session_state["usuario"]:
         st.markdown(f"### 👤 {st.session_state['usuario']}")
-        st.markdown(f"Tipo: {'Administrador' if st.session_state['tipo'] == 'admin' else 'OPE'}")
-        
+        tipo_legivel = "Administrador" if st.session_state["tipo"] == "admin" else "OPE"
+        st.markdown(f"Tipo: {tipo_legivel}")
+
+        # Botão de logout -------------------------------------------------------
         if st.button("🚪 Sair", use_container_width=True):
-            st.session_state["usuario"] = None
-            st.session_state["tipo"] = None
-            st.session_state["pagina"] = "empresas"
-            st.rerun()
-        
+            for key in ["usuario", "tipo", "pagina"]:
+                st.session_state.pop(key, None)
+            st.experimental_rerun()  # força redraw imediato
+
         st.markdown("---")
-        
-        # Menu de navegação
+
+        # Navegação -------------------------------------------------------------
         if st.session_state["tipo"] == "admin":
-            # Menu principal
             st.markdown("#### 📋 Menu Principal")
-            
-            # Opções do menu
-            opcoes_menu = {
-                "🏢 Empresas": "empresas",
-                "📄 Contratos": "contratos",
-                "🏭 Unidades": "unidades",
-                "🔧 Serviços": "servicos",
-                "👥 Usuários": "usuarios",
-                "📁 Pastas": "pastas",
-                "💾 Backup": "backup"
+
+            OP_MENU = {
+                "🏢 Empresas":   "empresas",
+                "📄 Contratos":  "contratos",
+                "🏭 Unidades":   "unidades",
+                "🔧 Serviços":   "servicos",
+                "👥 Usuários":   "usuarios",
+                "📁 Pastas":     "pastas",
+                "💾 Backup":     "backup",
             }
-            
-            # Selectbox para navegação
-            pagina_selecionada = st.selectbox(
-                "Selecione uma opção:",
-                options=list(opcoes_menu.keys()),
-                index=list(opcoes_menu.keys()).index(st.session_state["pagina"]),
-                format_func=lambda x: x
+
+            # Callback para mudar a página -------------------------------------
+            def _mudar_pagina():
+                escolha = st.session_state["menu_admin"]
+                st.session_state["pagina"] = OP_MENU[escolha]
+
+            st.selectbox(
+                label="Selecione uma opção:",
+                options=list(OP_MENU.keys()),
+                index=list(OP_MENU.values()).index(st.session_state["pagina"]),
+                key="menu_admin",
+                on_change=_mudar_pagina,
             )
-            
-            # Atualiza a página selecionada
-            if pagina_selecionada:
-                st.session_state["pagina"] = opcoes_menu[pagina_selecionada]
-                st.rerun()
-        
-        else:  # Tipo OPE
+        else:
+            # Tipo OPE ----------------------------------------------------------
             if st.button("🔧 Serviços", use_container_width=True):
                 st.session_state["pagina"] = "servicos_ope"
-                st.rerun()
 
-# Exibe a página apropriada
+# ------------------------------------------------------------------------------
+# 6. Renderização da tela principal
+# ------------------------------------------------------------------------------
 if not st.session_state["usuario"]:
-    exibir_tela_login()
+    carregar_tela("login")
 else:
-    pagina = st.session_state.get("pagina", "servicos" if st.session_state["tipo"] == "ope" else "empresas")
-    
-    if pagina == "empresas":
-        exibir_tela_empresas()
-    elif pagina == "contratos":
-        exibir_tela_contratos()
-    elif pagina == "unidades":
-        exibir_tela_unidades()
-    elif pagina == "servicos":
-        exibir_tela_servicos()
-    elif pagina == "servicos_ope":
-        exibir_tela_servicos_ope()
-    elif pagina == "usuarios":
-        exibir_tela_usuarios()
-    elif pagina == "pastas":
-        exibir_tela_grid_pastas()
-    elif pagina == "backup":
-        exibir_tela_backup() 
+    pagina = st.session_state.get("pagina", "empresas")
+    carregar_tela(pagina)
