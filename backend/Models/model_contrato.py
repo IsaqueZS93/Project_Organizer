@@ -10,7 +10,7 @@ from tempfile import gettempdir
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-from Database.db_gestaodecontratos import obter_conexao, salvar_banco_no_drive, DB_NAME
+from Database import db_gestaodecontratos as db
 from Services import Service_googledrive as gdrive
 from dotenv import load_dotenv
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def obter_nome_empresa_por_codigo(cod_empresa: str) -> Optional[str]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT nome FROM empresas WHERE cod_empresa = ?", (cod_empresa,))
             row = cursor.fetchone()
@@ -39,7 +39,7 @@ def criar_contrato(cod_empresa: str, empresa_contratada: str, numero_contrato: s
     try:
         logger.info(f"Iniciando criação do contrato {numero_contrato}")
         
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             
             # Verifica se o número do contrato já existe
@@ -99,9 +99,9 @@ def criar_contrato(cod_empresa: str, empresa_contratada: str, numero_contrato: s
                     return False
                 
                 # Salva no Drive
-                caminho_banco = Path(gettempdir()) / DB_NAME
+                caminho_banco = Path(gettempdir()) / db.DB_NAME
                 try:
-                    salvar_banco_no_drive(caminho_banco)
+                    db.salvar_banco_no_drive(caminho_banco)
                     logger.info(f"Contrato {numero_contrato} criado com sucesso")
                     return True
                 except Exception as e:
@@ -121,7 +121,7 @@ def criar_contrato(cod_empresa: str, empresa_contratada: str, numero_contrato: s
 
 def listar_contratos() -> List[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT numero_contrato, cod_empresa, empresa_contratada, titulo, especificacoes FROM contratos
@@ -134,7 +134,7 @@ def listar_contratos() -> List[Tuple]:
 
 def buscar_contrato_por_numero(numero_contrato: str) -> Optional[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
             return cursor.fetchone()
@@ -145,7 +145,7 @@ def buscar_contrato_por_numero(numero_contrato: str) -> Optional[Tuple]:
 
 def atualizar_contrato(numero_contrato: str, cod_empresa: str, empresa_contratada: str, titulo: str, especificacoes: str) -> bool:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE contratos
@@ -153,9 +153,21 @@ def atualizar_contrato(numero_contrato: str, cod_empresa: str, empresa_contratad
                 WHERE numero_contrato = ?
             """, (cod_empresa, empresa_contratada, titulo, especificacoes, numero_contrato))
             
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            salvar_banco_no_drive(caminho_banco)
-            return True
+            if cursor.rowcount > 0:
+                db.marca_sujo()
+            else:
+                logger.info(f"Nenhum contrato encontrado com o número {numero_contrato} para atualizar, ou os dados são os mesmos.")
+                return True # Sucesso se nada precisava ser atualizado
+
+        if getattr(db._thread_local, "dirty", False):
+            caminho_banco = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Contrato {numero_contrato} atualizado e banco salvo.")
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após atualizar contrato {numero_contrato}: {e_save}")
+                return True # Operação local bem-sucedida
+        return True # Sucesso se não estava sujo
 
     except Exception as e:
         print(f"❌ Erro ao atualizar contrato: {e}")
@@ -164,13 +176,29 @@ def atualizar_contrato(numero_contrato: str, cod_empresa: str, empresa_contratad
 
 def deletar_contrato(numero_contrato: str) -> bool:
     try:
-        with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
-            
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            salvar_banco_no_drive(caminho_banco)
-            return True
+        # Adicionar lógica para verificar/deletar unidades e serviços dependentes antes
+        # ou configurar ON DELETE CASCADE no banco (se SQLite suportar para as suas FKs).
+        # Por enquanto, deleta apenas da tabela contratos.
+        with db.obter_conexao() as conn_delete:
+            cursor_delete = conn_delete.cursor()
+            cursor_delete.execute("DELETE FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
+            if cursor_delete.rowcount > 0:
+                db.marca_sujo()
+                logger.info(f"Contrato {numero_contrato} deletado do banco.")
+            else:
+                logger.info(f"Contrato {numero_contrato} não encontrado no banco para deleção.")
+                return True # Sucesso se não havia o que deletar
+
+        if getattr(db._thread_local, "dirty", False):
+            caminho_banco = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Banco de dados salvo no Drive após deleção do contrato {numero_contrato}.")
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após deletar contrato {numero_contrato}: {e_save}")
+                return True # Operação local bem-sucedida
+        return True # Sucesso se não estava sujo ou operação bem-sucedida
+
     except Exception as e:
         print(f"❌ Erro ao deletar contrato: {e}")
         return False

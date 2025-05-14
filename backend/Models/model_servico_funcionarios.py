@@ -21,7 +21,8 @@ def atribuir_funcionario_a_servico(cod_servico: str, cod_funcionario: str) -> bo
             INSERT INTO servico_funcionarios (cod_servico, cod_funcionario)
             VALUES (?, ?)
         """, (cod_servico, cod_funcionario))
-        conn.commit()
+        db.marca_sujo()
+        db.salvar_banco_no_drive()
         return True
     except sqlite3.Error as e:
         print(f"Erro ao atribuir funcionário ao serviço: {e}")
@@ -71,7 +72,9 @@ def remover_funcionario_de_servico(cod_servico: str, cod_funcionario: str) -> bo
             DELETE FROM servico_funcionarios 
             WHERE cod_servico = ? AND cod_funcionario = ?
         """, (cod_servico, cod_funcionario))
-        conn.commit()
+        if cursor.rowcount > 0:
+            db.marca_sujo()
+        db.salvar_banco_no_drive()
         return True
     except sqlite3.Error as e:
         print(f"Erro ao remover funcionário do serviço: {e}")

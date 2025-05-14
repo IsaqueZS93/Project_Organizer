@@ -14,12 +14,14 @@ import sqlite3
 from pathlib import Path
 from tempfile import gettempdir
 from typing import List, Optional, Sequence, Tuple
+import sys
 
 from Database.db_gestaodecontratos import (
     DB_NAME,
     obter_conexao,
     salvar_banco_no_drive,
 )
+from Database import db_gestaodecontratos as db
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,7 @@ def criar_usuario(
     tipo: str,
 ) -> bool:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cur = conn.cursor()
             if cur.execute("SELECT 1 FROM usuarios WHERE usuario = ?", (usuario,)).fetchone():
                 logger.warning("Usuário duplicado: %s", usuario)
@@ -64,6 +66,7 @@ def criar_usuario(
                 """,
                 (nome, data_nascimento, funcao, usuario, senha, tipo),
             )
+            db.marca_sujo()
             return _sync_after_write(conn)
     except Exception as e:
         logger.error("Erro ao criar usuário: %s", e)
@@ -97,7 +100,7 @@ def listar_usuarios(
             params.append(offset)
 
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cur = conn.cursor()
             return cur.execute(sql, params).fetchall()
     except Exception as e:
@@ -107,7 +110,7 @@ def listar_usuarios(
 
 def buscar_usuario_por_id(usuario_id: int) -> Optional[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cur = conn.cursor()
             return cur.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
     except Exception as e:
@@ -125,7 +128,7 @@ def atualizar_usuario(
     tipo: str,
 ) -> bool:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cur = conn.cursor()
             if cur.execute(
                 "SELECT 1 FROM usuarios WHERE usuario = ? AND id != ?",
@@ -142,6 +145,7 @@ def atualizar_usuario(
                 """,
                 (nome, data_nascimento, funcao, usuario, senha, tipo, usuario_id),
             )
+            db.marca_sujo()
             return _sync_after_write(conn)
     except Exception as e:
         logger.error("Erro atualizar usuário: %s", e)
@@ -150,8 +154,9 @@ def atualizar_usuario(
 
 def deletar_usuario(usuario_id: int) -> bool:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             conn.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
+            db.marca_sujo()
             return _sync_after_write(conn)
     except Exception as e:
         logger.error("Erro deletar usuário: %s", e)
@@ -160,7 +165,7 @@ def deletar_usuario(usuario_id: int) -> bool:
 
 def autenticar_usuario(usuario: str, senha: str) -> Optional[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cur = conn.cursor()
             return cur.execute(
                 "SELECT id, nome, tipo FROM usuarios WHERE usuario=? AND senha=?",

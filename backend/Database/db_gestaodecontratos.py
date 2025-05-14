@@ -10,6 +10,7 @@ import threading
 import contextlib
 import logging
 import streamlit as st
+import time
 
 # Adiciona o caminho do backend para importar corretamente o módulo do Google Drive
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -23,10 +24,25 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 DB_NAME = "db_gestaodecontratos.db"
 DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
+_last_remote_ts: float = 0.0   # epoch seconds da última versão remota vista
 
 # Cache de conexão por thread
 _thread_local = threading.local()
-_last_download = None
+
+def marca_sujo() -> None:
+    """Marca o banco como modificado na thread atual."""
+    setattr(_thread_local, "dirty", True)
+
+def _remote_modified_ts(file_id: str) -> float:
+    """Obtém o timestamp de modificação de um arquivo no Google Drive."""
+    meta = gdrive.get_service().files().get(
+        fileId=file_id, fields="modifiedTime"
+    ).execute()
+    # O timestamp do Drive tem um 'Z' no final, que indica UTC.
+    # time.strptime não lida com frações de segundo ou 'Z' diretamente em todos os sistemas.
+    # Removemos as frações de segundo e o 'Z' para um parsing mais robusto.
+    ts_string = meta["modifiedTime"].split('.')[0] 
+    return time.mktime(time.strptime(ts_string, "%Y-%m-%dT%H:%M:%S"))
 
 def _get_drive_folder_id():
     """Obtém o ID da pasta do Drive do session_state ou do secrets.toml"""
@@ -90,10 +106,31 @@ def baixar_banco_do_drive():
             
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
         if not file_id:
-            raise Exception(f"Arquivo {DB_NAME} não encontrado no Drive")
+            # Se o arquivo não existe no Drive, tentamos criar um banco novo localmente.
+            # Se já existir um DB_PATH local, ele será usado. Caso contrário, será criado por inicializar_tabelas.
+            logger.warning(f"Arquivo {DB_NAME} não encontrado no Drive. Tentando usar/criar banco local.")
+            if not DB_PATH.exists():
+                # Força a criação de um banco novo se não existir localmente nem no Drive
+                conn_temp = sqlite3.connect(str(DB_PATH))
+                inicializar_tabelas(conn_temp)
+                conn_temp.commit()
+                conn_temp.close()
+                # Marca como dirty para forçar o upload inicial
+                if hasattr(_thread_local, 'conn'): # Verifica se a conexão já foi estabelecida
+                     _thread_local.dirty = True
+                salvar_banco_no_drive(DB_PATH) # Tenta salvar o novo banco no Drive
+                logger.info(f"Novo banco de dados local criado e salvo no Drive: {DB_PATH}")
+            return DB_PATH
+
+        remote_ts = _remote_modified_ts(file_id)
+        global _last_remote_ts
+        if DB_PATH.exists() and remote_ts <= _last_remote_ts:
+            logger.info("Versão local já está atualizada; download evitado.")
+            return DB_PATH
             
         caminho_local = DB_PATH
         gdrive.download_file(file_id, caminho_local)
+        _last_remote_ts = remote_ts # Atualiza o timestamp após download bem-sucedido
         logger.info(f"Banco de dados baixado com sucesso: {caminho_local}")
         return caminho_local
     except Exception as e:
@@ -111,9 +148,12 @@ def obter_conexao() -> sqlite3.Connection:
 
             _thread_local.conn = sqlite3.connect(str(caminho_banco))
             _thread_local.conn.row_factory = sqlite3.Row
+            _thread_local.dirty = False # Inicializa a flag dirty
             if novo:
                 inicializar_tabelas(_thread_local.conn)
                 _thread_local.conn.commit()
+                # Após inicializar um banco novo, ele está 'sujo' e precisa ser salvo.
+                _thread_local.dirty = True 
                 salvar_banco_no_drive(caminho_banco)
         
         return _thread_local.conn
@@ -142,11 +182,17 @@ class ConexaoContext:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
+        if exc_type is None and getattr(_thread_local, "dirty", False):
             try:
                 self.conn.commit()
-            except sqlite3.Error:
+                # O dirty só é resetado se o commit for bem sucedido E o upload subsequente também for.
+                # O upload em salvar_banco_no_drive cuidará de resetar dirty.
+            except sqlite3.Error as e:
+                logger.error(f"Erro no commit dentro do context manager: {e}")
+                # Não reseta dirty, pois o commit falhou.
                 pass
+        # Fechar a conexão não é feito aqui, pois `obter_conexao` gerencia isso por thread.
+        # `fechar_conexao` pode ser chamado explicitamente no final da sessão/aplicação se necessário.
 
 # ─────────────── Função de contexto ───────────────
 def conexao():
@@ -292,16 +338,38 @@ def inicializar_tabelas(conn: sqlite3.Connection):
 def salvar_banco_no_drive(caminho_banco: Path):
     """Salva o banco de dados no Google Drive"""
     try:
+        # Usa True como default para getattr para garantir que, se a flag não existir por algum motivo,
+        # ele tente salvar (comportamento seguro), especialmente na primeira execução ou após reinício.
+        if not getattr(_thread_local, "dirty", True):
+            logger.info("Nenhuma alteração local pendente (_thread_local.dirty=False); upload para o Drive evitado.")
+            return
+
         folder_id = _get_drive_folder_id()
         logger.info(f"Usando pasta do Drive: {folder_id}")
 
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
+        
+        # Antes de fazer upload/update, verifica se o arquivo remoto não foi modificado por outro processo.
+        if file_id:
+            remote_ts_before_upload = _remote_modified_ts(file_id)
+            if remote_ts_before_upload > _last_remote_ts:
+                logger.warning(f"CONFLITO DETECTADO: O arquivo no Drive ({remote_ts_before_upload}) é mais novo que a última sincronização local ({_last_remote_ts}). Upload abortado para evitar perda de dados.")
+                # Aqui, uma estratégia de resolução de conflitos mais elaborada poderia ser implementada.
+                # Por ora, apenas logamos e evitamos a sobrescrita.
+                # Opcionalmente, poderia levantar uma exceção para o chamador tratar.
+                st.error("❌ CONFLITO: O banco de dados no servidor foi modificado por outra sessão. Suas alterações não foram salvas para evitar perda de dados. Por favor, recarregue e tente novamente.")
+                return 
+
         if file_id:
             gdrive.update_file(file_id, str(caminho_banco))
             logger.info("Banco atualizado no Google Drive")
         else:
             gdrive.upload_file(str(caminho_banco), folder_id)
             logger.info("Banco enviado ao Google Drive")
+        
+        _thread_local.dirty = False # Upload bem-sucedido, banco não está mais sujo
+        _last_remote_ts = time.time() # Agora somos a versão mais nova
+
     except Exception as e:
         logger.error(f"Erro ao salvar banco no Drive: {str(e)}")
         raise
@@ -309,8 +377,9 @@ def salvar_banco_no_drive(caminho_banco: Path):
 # ─────────────── Atualizar banco de dados ───────────────
 def atualizar_banco():
     """Atualiza o banco de dados criando novas tabelas se necessário"""
-    conn = obter_conexao()
+    conn = obter_conexao() # _thread_local.dirty será False aqui inicialmente
     cursor = conn.cursor()
+    schema_changed = False
     
     # Verifica se a tabela empresas tem o campo pasta_empresa
     cursor.execute("PRAGMA table_info(empresas)")
@@ -318,6 +387,7 @@ def atualizar_banco():
     if 'pasta_empresa' not in colunas:
         print("📝 Adicionando campo pasta_empresa à tabela empresas...")
         cursor.execute("ALTER TABLE empresas ADD COLUMN pasta_empresa TEXT")
+        schema_changed = True
     
     # Verifica se a tabela contratos tem o campo pasta_contrato
     cursor.execute("PRAGMA table_info(contratos)")
@@ -325,6 +395,7 @@ def atualizar_banco():
     if 'pasta_contrato' not in colunas:
         print("📝 Adicionando campo pasta_contrato à tabela contratos...")
         cursor.execute("ALTER TABLE contratos ADD COLUMN pasta_contrato TEXT")
+        schema_changed = True
     
     # Verifica se a tabela unidades tem o campo pasta_unidade
     cursor.execute("PRAGMA table_info(unidades)")
@@ -332,6 +403,7 @@ def atualizar_banco():
     if 'pasta_unidade' not in colunas:
         print("📝 Adicionando campo pasta_unidade à tabela unidades...")
         cursor.execute("ALTER TABLE unidades ADD COLUMN pasta_unidade TEXT")
+        schema_changed = True
     
     # Verifica se a tabela servicos tem o campo pasta_servico
     cursor.execute("PRAGMA table_info(servicos)")
@@ -339,6 +411,7 @@ def atualizar_banco():
     if 'pasta_servico' not in colunas:
         print("📝 Adicionando campo pasta_servico à tabela servicos...")
         cursor.execute("ALTER TABLE servicos ADD COLUMN pasta_servico TEXT")
+        schema_changed = True
     
     # Verifica se a tabela servico_funcionarios existe
     cursor.execute("""
@@ -356,6 +429,7 @@ def atualizar_banco():
                 FOREIGN KEY(cod_funcionario) REFERENCES funcionarios(cod_funcionario)
             );
         """)
+        schema_changed = True
     
     # Verifica se as tabelas de arquivos existem
     cursor.execute("""
@@ -376,6 +450,7 @@ def atualizar_banco():
                 FOREIGN KEY(cod_servico) REFERENCES servicos(cod_servico)
             );
         """)
+        schema_changed = True
 
     cursor.execute("""
         SELECT name FROM sqlite_master 
@@ -395,6 +470,7 @@ def atualizar_banco():
                 FOREIGN KEY(numero_contrato) REFERENCES contratos(numero_contrato)
             );
         """)
+        schema_changed = True
 
     cursor.execute("""
         SELECT name FROM sqlite_master 
@@ -414,14 +490,33 @@ def atualizar_banco():
                 FOREIGN KEY(cod_unidade) REFERENCES unidades(cod_unidade)
             );
         """)
+        schema_changed = True
 
-    conn.commit()
-    caminho_banco = Path(tempfile.gettempdir()) / DB_NAME
-    salvar_banco_no_drive(caminho_banco)
+    if schema_changed:
+        _thread_local.dirty = True # Marca como sujo se o esquema mudou
+
+    conn.commit() # Commit local das alterações de esquema
+    
+    # Só salva no drive se algo mudou no esquema (ou se já estava dirty por outro motivo)
+    if getattr(_thread_local, "dirty", False):
+        salvar_banco_no_drive(Path(tempfile.gettempdir()) / DB_NAME)
+    
     print("✅ Banco de dados atualizado com sucesso!")
 
 # ─────────────── Execução isolada ───────────────
 if __name__ == "__main__":
+    # Para execução isolada, certifique-se que o st.session_state e st.secrets podem não estar disponíveis.
+    # Você pode precisar mocká-los ou usar valores padrão diretamente aqui se for testar _get_drive_folder_id
+    # ou outras funções dependentes do Streamlit.
+    
+    # Exemplo de mock básico se st não estiver disponível (apenas para __main__):
+    if 'streamlit' not in sys.modules:
+        class MockStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.secrets = {"gdrive": {"database_folder_id": "ID_PASTA_DRIVE_PADRAO_TESTE"}} # Exemplo
+        st = MockStreamlit()
+
     conn = obter_conexao()
     print("✅ Banco de dados pronto para uso.")
     atualizar_banco()  # Atualiza o banco ao executar o script

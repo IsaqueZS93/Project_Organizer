@@ -25,33 +25,22 @@ logger = logging.getLogger(__name__)
 
 # ──────────────── Funções Auxiliares ────────────────
 
-def gerar_codigo_servico() -> str:
-    """Gera um código único para o serviço no formato: OS_AAAAMMDD_XXX"""
+def gerar_codigo_servico() -> Optional[str]:
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
-            
-            # Obtém a data atual
             data_atual = datetime.now().strftime("%Y%m%d")
-            
-            # Busca o último código do dia
             cursor.execute("""
                 SELECT cod_servico FROM servicos 
                 WHERE cod_servico LIKE ? 
                 ORDER BY cod_servico DESC LIMIT 1
             """, (f"OS_{data_atual}_%",))
-            
             ultimo_codigo = cursor.fetchone()
-            
             if ultimo_codigo:
-                # Extrai o número sequencial e incrementa
                 ultimo_numero = int(ultimo_codigo[0].split('_')[-1])
                 novo_numero = ultimo_numero + 1
             else:
-                # Se não houver código hoje, começa do 1
                 novo_numero = 1
-            
-            # Formata o novo código com 3 dígitos
             return f"OS_{data_atual}_{novo_numero:03d}"
     except Exception as e:
         logger.error(f"Erro ao gerar código do serviço: {e}")
@@ -130,114 +119,82 @@ def obter_info_unidade(cod_servico: str) -> Optional[Tuple[str, str, str]]:
 def criar_servico(cod_servico: str, cod_unidade: str, tipo_servico: str, data_criacao: str, data_execucao: str, status: str, observacoes: str) -> bool:
     try:
         logger.info(f"Iniciando criação do serviço {cod_servico}")
-        
-        # Primeiro verifica se a unidade existe e obtém suas informações
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT u.nome_unidade, c.numero_contrato, e.nome, u.pasta_unidade, c.pasta_contrato, e.pasta_empresa
-                FROM unidades u
-                JOIN contratos c ON u.numero_contrato = c.numero_contrato
-                JOIN empresas e ON c.cod_empresa = e.cod_empresa
-                WHERE u.cod_unidade = ?
-            """, (cod_unidade,))
-            row = cursor.fetchone()
-            
-            if not row:
-                logger.error(f"Unidade não encontrada: {cod_unidade}")
-                return False
-                
-            nome_unidade, numero_contrato, nome_empresa, pasta_unidade_id, pasta_contrato_id, pasta_empresa_id = row
-            
-            if not pasta_unidade_id:
-                logger.error(f"Pasta da unidade não encontrada no banco para: {cod_unidade}")
-                return False
+            cursor.execute("SELECT u.nome_unidade, u.pasta_unidade, c.numero_contrato, e.nome \n                            FROM unidades u \n                            JOIN contratos c ON u.numero_contrato = c.numero_contrato \n                            JOIN empresas e ON c.cod_empresa = e.cod_empresa \n                            WHERE u.cod_unidade = ?", (cod_unidade,))
+            info_unidade = cursor.fetchone()
 
-        logger.info(f"Informações encontradas:")
-        logger.info(f"   - Unidade: {nome_unidade}")
-        logger.info(f"   - Contrato: {numero_contrato}")
-        logger.info(f"   - Empresa: {nome_empresa}")
-        logger.info(f"   - ID Pasta Unidade: {pasta_unidade_id}")
-        logger.info(f"   - ID Pasta Contrato: {pasta_contrato_id}")
-        logger.info(f"   - ID Pasta Empresa: {pasta_empresa_id}")
-
-        # Cria a pasta do serviço
-        timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
-        nome_pasta_servico = f"{cod_servico}_{nome_unidade}_{timestamp}"
-        logger.info(f"Criando pasta do serviço: {nome_pasta_servico}")
+        if not info_unidade:
+            logger.error(f"❌ Unidade não encontrada: {cod_unidade}")
+            return False
         
-        # Usa o ID da pasta da unidade para criar a pasta do serviço
+        nome_unidade, pasta_unidade_id, numero_contrato, nome_empresa = info_unidade
+        nome_pasta_servico = f"{cod_servico}_{tipo_servico.replace(' ', '_')}"
+
+        if not pasta_unidade_id:
+            logger.info(f"Pasta da unidade {cod_unidade} não encontrada no banco, tentando criar/obter.")
+            pasta_contrato_id = obter_pasta_contrato(numero_contrato, nome_empresa)
+            if not pasta_contrato_id:
+                logger.error(f"Pasta do contrato {numero_contrato} para empresa {nome_empresa} não encontrada.")
+                return False
+            pasta_unidade_id = gdrive.ensure_folder(f"{nome_unidade}_{cod_unidade}", pasta_contrato_id)
+            if not pasta_unidade_id:
+                logger.error(f"Não foi possível criar a pasta para a unidade {nome_unidade} no Drive.")
+                return False
+            with db.obter_conexao() as conn_update: # Nova conexão para este update específico
+                cursor_update = conn_update.cursor()
+                cursor_update.execute("UPDATE unidades SET pasta_unidade = ? WHERE cod_unidade = ?", (pasta_unidade_id, cod_unidade))
+                db.marca_sujo()
+                logger.info(f"Pasta da unidade {cod_unidade} atualizada no banco com ID: {pasta_unidade_id}")
+        
         pasta_servico_id = gdrive.ensure_folder(nome_pasta_servico, pasta_unidade_id)
         if not pasta_servico_id:
-            logger.error("Erro ao criar pasta do serviço")
+            logger.error(f"Erro ao criar pasta do serviço {nome_pasta_servico} no Drive.")
             return False
-        logger.info(f"Pasta do serviço criada com sucesso: {pasta_servico_id}")
+        logger.info(f"Pasta do serviço {nome_pasta_servico} criada com ID: {pasta_servico_id}")
 
-        try:
-            # Inicia uma transação
-            with db.obter_conexao() as conn:
-                cursor = conn.cursor()
-                conn.execute("BEGIN TRANSACTION")
-                
-                # Verifica se o código do serviço já existe
-                cursor.execute("SELECT cod_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
-                if cursor.fetchone():
-                    logger.warning(f"Tentativa de criar serviço com código duplicado: {cod_servico}")
-                    conn.rollback()
-                    return False
-                
-                # Insere no banco
-                cursor.execute("""
-                    INSERT INTO servicos (
-                        cod_servico, cod_unidade, tipo_servico, data_criacao, 
-                        data_execucao, status, observacoes, pasta_servico
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    cod_servico, cod_unidade, tipo_servico, data_criacao,
-                    data_execucao, status, observacoes, pasta_servico_id
-                ))
-                
-                # Força o commit
-                conn.commit()
-                logger.info("Dados inseridos no banco com sucesso")
-                
-                # Verifica se o serviço foi realmente inserido
-                cursor.execute("SELECT cod_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
-                if not cursor.fetchone():
-                    logger.error("Erro: Serviço não foi inserido no banco")
-                    conn.rollback()
-                    return False
-                
-                # Salva no Drive
-                caminho_banco = Path(gettempdir()) / db.DB_NAME
-                try:
-                    db.salvar_banco_no_drive(caminho_banco)
-                    logger.info(f"Serviço {cod_servico} criado com sucesso")
-                    return True
-                except Exception as e:
-                    logger.error(f"Erro ao salvar banco no Drive: {e}")
-                    # Mesmo com erro no Drive, o serviço foi criado localmente
-                    return True
-                    
-        except Exception as e:
-            logger.error(f"Erro durante a transação: {e}")
-            conn.rollback()
-            return False
+        with db.obter_conexao() as conn: # Conexão principal para inserir o serviço
+            cursor = conn.cursor()
+            cursor.execute("SELECT cod_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
+            if cursor.fetchone():
+                logger.warning(f"Tentativa de criar serviço com código duplicado: {cod_servico}")
+                return False
+            
+            cursor.execute("""
+                INSERT INTO servicos (
+                    cod_servico, cod_unidade, tipo_servico, data_criacao, 
+                    data_execucao, status, observacoes, pasta_servico
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cod_servico, cod_unidade, tipo_servico, data_criacao,
+                data_execucao, status, observacoes, pasta_servico_id
+            ))
+            db.marca_sujo()
+            logger.info(f"Serviço {cod_servico} inserido no banco de dados.")
 
-    except Exception as e:
-        logger.error(f"Erro ao criar serviço: {e}")
+            # Salva o estado do banco de dados no Drive
+            caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco_local)
+                logger.info(f"Banco de dados salvo no Drive após criação do serviço {cod_servico}.")
+                return True
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após criar serviço {cod_servico}: {e_save}")
+                return True # Retorna True pois a operação no banco local foi bem-sucedida
+
+    except Exception as e_main:
+        logger.error(f"Erro geral ao criar serviço {cod_servico}: {e_main}")
         return False
 
 
 def listar_servicos() -> List[Tuple]:
-    """Lista todos os serviços cadastrados"""
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT cod_servico, cod_unidade, tipo_servico, data_criacao, data_execucao, status, observacoes FROM servicos")
+            cursor.execute("SELECT * FROM servicos ORDER BY data_criacao DESC")
             return cursor.fetchall()
-    except sqlite3.Error as e:
-        print(f"❌ Erro ao listar serviços: {e}")
+    except Exception as e:
+        logger.error(f"Erro ao listar serviços: {e}")
         return []
 
 
@@ -260,143 +217,254 @@ def buscar_servico_por_codigo(cod_servico: str) -> Optional[Tuple]:
         return None
 
 
-def atualizar_servico(cod_servico: str, tipo_servico: str, data_execucao: str, status: str, observacoes: str) -> bool:
+def atualizar_servico(cod_servico_original: str, novo_tipo_servico: str, nova_data_execucao: str, novo_status: str, novas_observacoes: str) -> bool:
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                UPDATE servicos
+                UPDATE servicos 
                 SET tipo_servico = ?, data_execucao = ?, status = ?, observacoes = ?
                 WHERE cod_servico = ?
-            """, (tipo_servico, data_execucao, status, observacoes, cod_servico))
+            """, (novo_tipo_servico, nova_data_execucao, novo_status, novas_observacoes, cod_servico_original))
+            db.marca_sujo()
+        
+        caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+        try:
+            db.salvar_banco_no_drive(caminho_banco_local)
+            logger.info(f"Serviço {cod_servico_original} atualizado e banco salvo no Drive.")
             return True
-    except Exception as e:
-        print(f"❌ Erro ao atualizar serviço: {e}")
+        except Exception as e_save:
+            logger.error(f"Erro ao salvar banco no Drive após atualizar serviço {cod_servico_original}: {e_save}")
+            return True # Operação local bem-sucedida
+            
+    except Exception as e_main:
+        logger.error(f"Erro ao atualizar serviço {cod_servico_original}: {e_main}")
         return False
 
-
 def deletar_servico(cod_servico: str) -> bool:
-    """Exclui um serviço do banco de dados"""
     try:
-        with db.obter_conexao() as conn:
+        with db.obter_conexao() as conn: # Primeira conexão para deletar de servico_funcionarios
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM servico_funcionarios WHERE cod_servico = ?", (cod_servico,))
+            db.marca_sujo() # Marca sujo após o primeiro delete
+
+        with db.obter_conexao() as conn: # Segunda conexão para deletar de servicos
             cursor = conn.cursor()
             cursor.execute("DELETE FROM servicos WHERE cod_servico = ?", (cod_servico,))
+            db.marca_sujo() # Marca sujo após o segundo delete
+        
+        caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+        try:
+            db.salvar_banco_no_drive(caminho_banco_local)
+            logger.info(f"Serviço {cod_servico} deletado e banco salvo no Drive.")
             return True
-    except Exception as e:
-        print(f"❌ Erro ao deletar serviço: {e}")
+        except Exception as e_save:
+            logger.error(f"Erro ao salvar banco no Drive após deletar serviço {cod_servico}: {e_save}")
+            return True # Operação local bem-sucedida
+
+    except Exception as e_main:
+        logger.error(f"Erro ao deletar serviço {cod_servico}: {e_main}")
         return False
 
 # ──────────────── Funções de Arquivos ────────────────
 
-def upload_arquivo_servico(cod_servico: str, arquivo: bytes, nome_arquivo: str, tipo_arquivo: str, descricao: str = None) -> bool:
+def upload_arquivo_servico(cod_servico: str, arquivo_upload: st.runtime.uploaded_file_manager.UploadedFile, descricao: Optional[str] = None) -> bool:
+    arquivo_bytes = arquivo_upload.getvalue()
+    nome_arquivo_original = arquivo_upload.name
+    tipo_arquivo = arquivo_upload.type
+    
     try:
-        logger.info(f"Iniciando upload do arquivo: {nome_arquivo}")
-        logger.info(f"   - Serviço: {cod_servico}")
-        logger.info(f"   - Tipo: {tipo_arquivo}")
-        logger.info(f"   - Descrição: {descricao or 'Sem descrição'}")
-
-        # Busca o ID da pasta do serviço
+        logger.info(f"Iniciando upload do arquivo: {nome_arquivo_original} para o serviço: {cod_servico}")
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT pasta_servico FROM servicos WHERE cod_servico = ?", (cod_servico,))
             row = cursor.fetchone()
             if not row or not row[0]:
-                logger.error("Pasta do serviço não encontrada no banco")
+                logger.error(f"Pasta do serviço {cod_servico} não encontrada no banco.")
                 return False
             pasta_servico_id = row[0]
-
-        logger.info(f"Pasta do serviço encontrada")
-
-        # 📁 Verificar ou criar pasta "Arquivos"
-        pasta_arquivos = "Arquivos"
-        pasta_arquivos_id = gdrive.get_file_id_by_name(pasta_arquivos, pasta_servico_id)
+        
+        pasta_arquivos_nome = "Arquivos"
+        pasta_arquivos_id = gdrive.ensure_folder(pasta_arquivos_nome, pasta_servico_id)
         if not pasta_arquivos_id:
-            logger.info(f"Criando pasta de arquivos: {pasta_arquivos}")
-            pasta_arquivos_id = gdrive.ensure_folder(pasta_arquivos, pasta_servico_id)
-            if not pasta_arquivos_id:
-                logger.error("Erro ao criar pasta de arquivos")
-                return False
-            logger.info(f"Pasta de arquivos criada: {pasta_arquivos_id}")
-        else:
-            logger.info(f"Pasta de arquivos encontrada: {pasta_arquivos_id}")
+            logger.error(f"Erro ao criar/garantir a pasta \"{pasta_arquivos_nome}\" no Drive para o serviço {cod_servico}.")
+            return False
 
-        # 🧠 Gerar nome único para o novo arquivo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        extensao = nome_arquivo.split('.')[-1].lower()
-
-        # 🎯 Buscar o último arquivo do dia
-        with db.obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
+        extensao = nome_arquivo_original.split('.')[-1].lower() if '.' in nome_arquivo_original else ''
+        
+        with db.obter_conexao() as conn_seq:
+            cursor_seq = conn_seq.cursor()
+            cursor_seq.execute("""
                 SELECT nome_arquivo FROM arquivos_servico 
                 WHERE cod_servico = ? AND nome_arquivo LIKE ?
                 ORDER BY nome_arquivo DESC LIMIT 1
             """, (cod_servico, f"{cod_servico}_{timestamp.split('_')[0]}%"))
-            ultimo_arquivo = cursor.fetchone()
-
-        novo_numero = (
-            int(ultimo_arquivo[0].split('_')[-1].split('.')[0]) + 1
-            if ultimo_arquivo else 1
-        )
-        novo_nome = f"{cod_servico}_{timestamp}_{novo_numero:03d}.{extensao}"
-        logger.info(f"Novo nome do arquivo: {novo_nome}")
-
-        # ☁️ Upload do arquivo
-        logger.info(f"Enviando arquivo: {novo_nome}")
-        # Criar um arquivo temporário
-        temp_file = Path(gettempdir()) / novo_nome
-        temp_file.write_bytes(arquivo)
+            ultimo_arquivo_seq = cursor_seq.fetchone()
         
-        # Fazer o upload do arquivo
-        drive_file_id = gdrive.upload_file(str(temp_file), pasta_arquivos_id)
-        
-        # Remover o arquivo temporário
-        temp_file.unlink()
-        
-        if not drive_file_id:
-            logger.error("Erro ao fazer upload do arquivo")
-            return False
-        logger.info(f"Arquivo enviado com sucesso: {drive_file_id}")
+        novo_numero_seq = 1
+        if ultimo_arquivo_seq and ultimo_arquivo_seq[0]:
+            try:
+                partes_nome = ultimo_arquivo_seq[0].split('_')
+                if len(partes_nome) > 2:
+                    num_str = partes_nome[-1].split('.')[0]
+                    if num_str.isdigit():
+                        novo_numero_seq = int(num_str) + 1
+            except ValueError:
+                pass # Mantém novo_numero_seq = 1 se o parsing falhar
 
+        novo_nome_arquivo = f"{cod_servico}_{timestamp}_{novo_numero_seq:03d}{f'.{extensao}' if extensao else ''}"
+        
+        temp_path = Path(gettempdir()) / novo_nome_arquivo
         try:
-            # Inicia uma transação
-            with db.obter_conexao() as conn:
-                cursor = conn.cursor()
-                conn.execute("BEGIN TRANSACTION")
-                
-                # 💾 Inserir registro no banco
-                cursor.execute("""
-                    INSERT INTO arquivos_servico (cod_servico, nome_arquivo, tipo_arquivo, drive_file_id, data_upload, descricao)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    cod_servico, novo_nome, tipo_arquivo, drive_file_id,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"), descricao
-                ))
-                
-                # Força o commit
-                conn.commit()
-                logger.info("Registro inserido no banco com sucesso")
-                
-                # Verifica se o arquivo foi realmente inserido
-                cursor.execute("SELECT id FROM arquivos_servico WHERE nome_arquivo = ?", (novo_nome,))
-                if not cursor.fetchone():
-                    logger.error("Erro: Arquivo não foi inserido no banco")
-                    conn.rollback()
-                    return False
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"Erro durante a transação: {e}")
-            conn.rollback()
-            return False
+            with open(temp_path, "wb") as f:
+                f.write(arquivo_bytes)
+            
+            drive_file_id = gdrive.upload_file(str(temp_path), pasta_arquivos_id)
+            if not drive_file_id:
+                logger.error(f"Falha no upload do arquivo {novo_nome_arquivo} para o Drive.")
+                return False
+        finally:
+            if temp_path.exists():
+                temp_path.unlink() # Garante que o arquivo temporário seja removido
 
+        with db.obter_conexao() as conn_insert:
+            cursor_insert = conn_insert.cursor()
+            cursor_insert.execute("""
+                INSERT INTO arquivos_servico (
+                    cod_servico, nome_arquivo, tipo_arquivo, drive_file_id, data_upload, descricao
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                cod_servico, novo_nome_arquivo, tipo_arquivo, drive_file_id, 
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                descricao
+            ))
+            db.marca_sujo()
+            logger.info(f"Registro do arquivo {novo_nome_arquivo} salvo no banco.")
+
+        caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+        try:
+            db.salvar_banco_no_drive(caminho_banco_local)
+            logger.info(f"Upload do arquivo {novo_nome_arquivo} e atualização do banco concluídos.")
+            return True
+        except Exception as e_save:
+            logger.error(f"Erro ao salvar banco no Drive após upload do arquivo: {e_save}")
+            return True # Operação local no banco bem-sucedida
+
+    except Exception as e_main:
+        logger.error(f"Erro geral no upload do arquivo para o serviço {cod_servico}: {e_main}")
+        return False
+
+def deletar_arquivo_servico(arquivo_id: int) -> bool:
+    try:
+        drive_file_id_para_deletar = None
+        nome_arquivo_deletado = "[desconhecido]"
+        with db.obter_conexao() as conn_select:
+            cursor_select = conn_select.cursor()
+            cursor_select.execute("SELECT drive_file_id, nome_arquivo FROM arquivos_servico WHERE id = ?", (arquivo_id,))
+            res = cursor_select.fetchone()
+            if res:
+                drive_file_id_para_deletar, nome_arquivo_deletado = res
+            else:
+                logger.warning(f"Arquivo com ID {arquivo_id} não encontrado no banco para deleção.")
+                # Considerar retornar False se o arquivo não existe no banco, 
+                # mas a lógica atual prossegue para tentar deletar do Drive se o ID for conhecido
+                # e depois tenta deletar do banco (o que não fará nada se não existir).
+
+        if drive_file_id_para_deletar:
+            if gdrive.delete_file(drive_file_id_para_deletar):
+                logger.info(f"Arquivo {nome_arquivo_deletado} (ID Drive: {drive_file_id_para_deletar}) deletado do Google Drive.")
+            else:
+                logger.warning(f"Falha ao deletar arquivo {nome_arquivo_deletado} (ID Drive: {drive_file_id_para_deletar}) do Google Drive. Pode já ter sido removido.")
+        
+        with db.obter_conexao() as conn_delete:
+            cursor_delete = conn_delete.cursor()
+            cursor_delete.execute("DELETE FROM arquivos_servico WHERE id = ?", (arquivo_id,))
+            # Verifica se alguma linha foi afetada para marcar como sujo
+            if cursor_delete.rowcount > 0:
+                db.marca_sujo()
+                logger.info(f"Registro do arquivo (ID: {arquivo_id}) deletado do banco de dados.")
+            else:
+                logger.info(f"Nenhum registro de arquivo com ID {arquivo_id} encontrado para deletar do banco (pode já ter sido removido).")
+
+        caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+        if getattr(db._thread_local, "dirty", False): # Salva apenas se algo foi realmente modificado
+            try:
+                db.salvar_banco_no_drive(caminho_banco_local)
+                logger.info(f"Banco de dados salvo no Drive após deleção do arquivo {arquivo_id}.")
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após deletar arquivo {arquivo_id}: {e_save}")
+                return True # Operação local no banco (deleção) pode ter sido bem-sucedida
+        return True
+            
+    except Exception as e_main:
+        logger.error(f"Erro ao deletar arquivo do serviço (ID: {arquivo_id}): {e_main}")
+        return False
+
+def atualizar_descricao_arquivo(arquivo_id: int, nova_descricao: str) -> bool:
+    try:
+        with db.obter_conexao() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE arquivos_servico SET descricao = ? WHERE id = ?", (nova_descricao, arquivo_id))
+            if cursor.rowcount > 0:
+                 db.marca_sujo()
+        
+        if getattr(db._thread_local, "dirty", False):
+            caminho_banco_local = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco_local)
+                logger.info(f"Descrição do arquivo {arquivo_id} atualizada e banco salvo.")
+                return True
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após atualizar descrição: {e_save}")
+                return True # Operação local bem-sucedida
+        else:
+            logger.info(f"Descrição do arquivo {arquivo_id} não precisou de atualização ou não foi encontrada.")
+            return True # Considera sucesso se não houve erro e nenhuma alteração era necessária/possível
+            
+    except Exception as e_main:
+        logger.error(f"Erro ao atualizar descrição do arquivo {arquivo_id}: {e_main}")
+        return False
+
+def transferir_arquivo_servico(arquivo_id: int, nova_pasta_id: str) -> bool:
+    try:
+        with db.obter_conexao() as conn_select: # Conexão apenas para leitura inicial
+            cursor = conn_select.cursor()
+            cursor.execute("SELECT drive_file_id, nome_arquivo FROM arquivos_servico WHERE id = ?", (arquivo_id,))
+            resultado = cursor.fetchone()
+            if not resultado:
+                logger.error(f"❌ Arquivo com ID {arquivo_id} não encontrado no banco de dados para transferência.")
+                return False
+            drive_file_id, nome_arquivo = resultado
+            
+        file_metadata = gdrive.get_service().files().get(fileId=drive_file_id, fields="parents").execute()
+        old_parent_id = file_metadata.get('parents')[0] if file_metadata.get('parents') else None
+
+        if not old_parent_id:
+            logger.warning(f"Não foi possível determinar a pasta pai original do arquivo {drive_file_id} (Nome: {nome_arquivo}). A tentativa de mover prosseguirá.")
+
+        if not gdrive.move_file(drive_file_id, nova_pasta_id, old_parent_id):
+            logger.error(f"❌ Erro ao mover arquivo {nome_arquivo} (ID Drive: {drive_file_id}) no Google Drive para a pasta {nova_pasta_id}.")
+            return False
+        
+        logger.info(f"✅ Arquivo {nome_arquivo} (ID Drive: {drive_file_id}) movido para pasta {nova_pasta_id} no Drive.")
+        # Nenhuma alteração no banco de dados é realizada por esta função atualmente.
+        # Se, no futuro, a tabela 'arquivos_servico' tiver um campo para armazenar 'pasta_drive_id',
+        # aqui seria o local para um UPDATE e db.marca_sujo(), seguido por db.salvar_banco_no_drive().
+        # Exemplo:
+        # with db.obter_conexao() as conn_update:
+        #     cursor_update = conn_update.cursor()
+        #     cursor_update.execute("UPDATE arquivos_servico SET pasta_drive_atual_id = ? WHERE id = ?", (nova_pasta_id, arquivo_id))
+        #     if cursor_update.rowcount > 0:
+        #         db.marca_sujo()
+        #         # Chamar db.salvar_banco_no_drive() se sujo
+        return True # Retorna True pois a operação no Drive foi bem-sucedida.
+            
     except Exception as e:
-        logger.error(f"Erro ao fazer upload do arquivo: {e}")
+        logger.error(f"❌ Erro ao transferir arquivo (ID: {arquivo_id}): {e}")
         return False
 
 def listar_arquivos_servico(cod_servico: str) -> List[Tuple]:
-    """Lista todos os arquivos associados a um serviço"""
     try:
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
@@ -408,132 +476,62 @@ def listar_arquivos_servico(cod_servico: str) -> List[Tuple]:
             """, (cod_servico,))
             return cursor.fetchall()
     except sqlite3.Error as e:
-        print(f"❌ Erro ao listar arquivos do serviço: {e}")
+        logger.error(f"Erro ao listar arquivos do serviço {cod_servico}: {e}")
         return []
 
-
-def deletar_arquivo_servico(arquivo_id: int) -> bool:
-    """Exclui um arquivo de um serviço"""
-    try:
-        conn = db.obter_conexao()
-        cursor = conn.cursor()
-        
-        # Obtém informações do arquivo
-        cursor.execute("SELECT drive_file_id FROM arquivos_servico WHERE id = ?", (arquivo_id,))
-        row = cursor.fetchone()
-        if not row:
-            print("❌ Arquivo não encontrado no banco")
-            return False
-            
-        drive_file_id = row[0]
-        
-        # Deleta do Drive
-        if not gdrive.delete_file(drive_file_id):
-            print("❌ Erro ao deletar arquivo do Drive")
-            return False
-            
-        # Deleta do banco
-        cursor.execute("DELETE FROM arquivos_servico WHERE id = ?", (arquivo_id,))
-        conn.commit()
-        
-        print("✅ Arquivo deletado com sucesso")
-        return True
-
-    except Exception as e:
-        print("❌ Erro ao deletar arquivo:", e)
-        return False
 
 def listar_funcionarios_servico(cod_servico: str) -> List[Tuple]:
-    """Lista todos os funcionários associados a um serviço"""
     try:
-        conn = db.obter_conexao()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT f.cod_funcionario, f.nome, f.cargo
-            FROM funcionarios f
-            INNER JOIN servico_funcionarios sf ON f.cod_funcionario = sf.cod_funcionario
-            WHERE sf.cod_servico = ?
-            ORDER BY f.nome
-        """, (cod_servico,))
-        resultados = cursor.fetchall()
-        return resultados
-    except sqlite3.Error as e:
-        print(f"❌ Erro ao listar funcionários do serviço: {e}")
-        return []
-
-def download_arquivo_servico(arquivo_id: int) -> Optional[bytes]:
-    """Baixa um arquivo do serviço pelo ID do registro no banco"""
-    temp_file = None
-    try:
-        # Busca informações do arquivo no banco
         with db.obter_conexao() as conn:
             cursor = conn.cursor()
+            # Exemplo de JOIN para obter nomes dos funcionários
             cursor.execute("""
-                SELECT nome_arquivo, drive_file_id, tipo_arquivo
-                FROM arquivos_servico
-                WHERE id = ?
-            """, (arquivo_id,))
+                SELECT f.cod_funcionario, f.nome, f.funcao
+                FROM servico_funcionarios sf
+                JOIN funcionarios f ON sf.cod_funcionario = f.cod_funcionario
+                WHERE sf.cod_servico = ?
+            """, (cod_servico,))
+            return cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Erro ao listar funcionários do serviço {cod_servico}: {e}")
+        return []
+
+def download_arquivo_servico(arquivo_id: int) -> Optional[Tuple[bytes, str, str]]:
+    temp_file_path = None
+    try:
+        with db.obter_conexao() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT nome_arquivo, drive_file_id, tipo_arquivo FROM arquivos_servico WHERE id = ?", (arquivo_id,))
             row = cursor.fetchone()
-            
             if not row:
-                logger.error(f"Arquivo não encontrado no banco: {arquivo_id}")
+                logger.error(f"Arquivo com ID {arquivo_id} não encontrado no banco.")
                 return None
-                
             nome_arquivo, drive_file_id, tipo_arquivo = row
             
-        logger.info(f"Iniciando download do arquivo:")
-        logger.info(f"   - Nome: {nome_arquivo}")
-        logger.info(f"   - Tipo: {tipo_arquivo}")
-        logger.info(f"   - ID Drive: {drive_file_id}")
+        logger.info(f"Iniciando download do arquivo: {nome_arquivo} (ID Drive: {drive_file_id})")
+        temp_file_path = Path(gettempdir()) / nome_arquivo
         
-        # Cria um arquivo temporário para o download
-        temp_file = Path(gettempdir()) / nome_arquivo
-        
-        # Baixa o arquivo do Drive para o arquivo temporário
-        download_sucesso = gdrive.download_file(drive_file_id, str(temp_file))
-        if not download_sucesso:
-            logger.error("Erro ao baixar arquivo do Drive")
+        if not gdrive.download_file(drive_file_id, str(temp_file_path)):
+            logger.error(f"Erro ao baixar arquivo {nome_arquivo} do Drive.")
             return None
             
-        # Verifica se o arquivo foi criado e tem tamanho
-        if not temp_file.exists():
-            logger.error("Arquivo temporário não foi criado")
+        if not temp_file_path.exists() or temp_file_path.stat().st_size == 0:
+            logger.error(f"Arquivo {nome_arquivo} baixado do Drive está vazio ou não existe localmente.")
             return None
             
-        tamanho_arquivo = temp_file.stat().st_size
-        logger.info(f"Arquivo temporário criado com sucesso: {tamanho_arquivo} bytes")
-        
-        if tamanho_arquivo == 0:
-            logger.error("Arquivo temporário está vazio")
-            return None
-            
-        # Lê o conteúdo do arquivo temporário
-        try:
-            arquivo_bytes = temp_file.read_bytes()
-            logger.info(f"Arquivo lido com sucesso: {len(arquivo_bytes)} bytes")
-            
-            # Verifica se os bytes foram lidos corretamente
-            if len(arquivo_bytes) == 0:
-                logger.error("Nenhum byte foi lido do arquivo")
-                return None
-                
-            return arquivo_bytes
-            
-        except Exception as e:
-            logger.error(f"Erro ao ler arquivo temporário: {e}")
-            return None
-            
+        file_bytes = temp_file_path.read_bytes()
+        logger.info(f"Arquivo {nome_arquivo} baixado com sucesso ({len(file_bytes)} bytes).")
+        return file_bytes, nome_arquivo, tipo_arquivo
+
     except Exception as e:
-        logger.error(f"Erro ao baixar arquivo: {e}")
+        logger.error(f"Erro no processo de download do arquivo {arquivo_id}: {e}")
         return None
     finally:
-        # Garante que o arquivo temporário seja removido
-        if temp_file and temp_file.exists():
+        if temp_file_path and temp_file_path.exists():
             try:
-                temp_file.unlink()
-                logger.info("Arquivo temporário removido com sucesso")
-            except Exception as e:
-                logger.error(f"Erro ao remover arquivo temporário: {e}")
+                temp_file_path.unlink()
+            except Exception as e_unlink:
+                logger.warning(f"Falha ao remover arquivo temporário {temp_file_path}: {e_unlink}")
 
 def obter_info_arquivo(arquivo_id: int) -> Optional[Tuple]:
     """Obtém informações de um arquivo do serviço"""
@@ -549,51 +547,3 @@ def obter_info_arquivo(arquivo_id: int) -> Optional[Tuple]:
     except sqlite3.Error as e:
         print(f"❌ Erro ao buscar informações do arquivo: {e}")
         return None
-
-def transferir_arquivo_servico(arquivo_id: int, nova_pasta_id: str) -> bool:
-    """
-    Transfere um arquivo para uma nova pasta e atualiza o banco de dados.
-    
-    Args:
-        arquivo_id (int): ID do arquivo no banco de dados
-        nova_pasta_id (str): ID da nova pasta no Google Drive
-        
-    Returns:
-        bool: True se a transferência foi bem sucedida, False caso contrário
-    """
-    try:
-        with db.obter_conexao() as conn:
-            cursor = conn.cursor()
-            
-            # Obtém informações do arquivo
-            cursor.execute("""
-                SELECT drive_file_id, cod_servico, nome_arquivo
-                FROM arquivos_servico
-                WHERE id = ?
-            """, (arquivo_id,))
-            
-            resultado = cursor.fetchone()
-            if not resultado:
-                print("❌ Arquivo não encontrado no banco de dados")
-                return False
-                
-            drive_file_id, cod_servico, nome_arquivo = resultado
-            
-            # Move o arquivo no Google Drive
-            if not gdrive.move_file(drive_file_id, nova_pasta_id):
-                print("❌ Erro ao mover arquivo no Google Drive")
-                return False
-            
-            # Atualiza o registro no banco de dados
-            cursor.execute("""
-                UPDATE arquivos_servico
-                SET pasta_drive = ?
-                WHERE id = ?
-            """, (nova_pasta_id, arquivo_id))
-            
-            print(f"✅ Arquivo {nome_arquivo} transferido com sucesso")
-            return True
-            
-    except Exception as e:
-        print(f"❌ Erro ao transferir arquivo: {e}")
-        return False

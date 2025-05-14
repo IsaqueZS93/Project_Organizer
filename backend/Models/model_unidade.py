@@ -11,7 +11,7 @@ from tempfile import gettempdir
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-from Database.db_gestaodecontratos import obter_conexao, salvar_banco_no_drive, DB_NAME
+from Database import db_gestaodecontratos as db
 from Services import Service_googledrive as gdrive
 from dotenv import load_dotenv
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def obter_pasta_contrato(numero_contrato: str, nome_empresa: str) -> Optional[str]:
     try:
         # Busca o nome exato da empresa contratada no banco
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT empresa_contratada FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
             row = cursor.fetchone()
@@ -84,7 +84,7 @@ def obter_pasta_contrato(numero_contrato: str, nome_empresa: str) -> Optional[st
 
 def obter_nome_empresa_por_contrato(numero_contrato: str) -> Optional[str]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT e.nome FROM contratos c
@@ -110,7 +110,7 @@ def criar_unidade(numero_contrato: str, nome_unidade: str, estado: str, cidade: 
         logger.info(f"Empresa encontrada: {nome_empresa}")
 
         # Busca o ID da pasta do contrato
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT pasta_contrato FROM contratos WHERE numero_contrato = ?", (numero_contrato,))
             row = cursor.fetchone()
@@ -133,7 +133,7 @@ def criar_unidade(numero_contrato: str, nome_unidade: str, estado: str, cidade: 
 
         try:
             # Inicia uma transação
-            with obter_conexao() as conn:
+            with db.obter_conexao() as conn:
                 cursor = conn.cursor()
                 conn.execute("BEGIN TRANSACTION")
                 
@@ -162,9 +162,9 @@ def criar_unidade(numero_contrato: str, nome_unidade: str, estado: str, cidade: 
                     return False
                 
                 # Salva no Drive
-                caminho_banco = Path(gettempdir()) / DB_NAME
+                caminho_banco = Path(gettempdir()) / db.DB_NAME
                 try:
-                    salvar_banco_no_drive(caminho_banco)
+                    db.salvar_banco_no_drive(caminho_banco)
                     logger.info(f"Unidade {cod_unidade} criada com sucesso")
                     return True
                 except Exception as e:
@@ -184,7 +184,7 @@ def criar_unidade(numero_contrato: str, nome_unidade: str, estado: str, cidade: 
 
 def listar_unidades() -> List[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT cod_unidade, numero_contrato, nome_unidade, estado, cidade, localizacao FROM unidades")
             return cursor.fetchall()
@@ -195,7 +195,7 @@ def listar_unidades() -> List[Tuple]:
 
 def buscar_unidade_por_codigo(cod_unidade: str) -> Optional[Tuple]:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM unidades WHERE cod_unidade = ?", (cod_unidade,))
             return cursor.fetchone()
@@ -206,7 +206,7 @@ def buscar_unidade_por_codigo(cod_unidade: str) -> Optional[Tuple]:
 
 def atualizar_unidade(cod_unidade: str, numero_contrato: str, nome_unidade: str, estado: str, cidade: str, localizacao: str) -> bool:
     try:
-        with obter_conexao() as conn:
+        with db.obter_conexao() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE unidades
@@ -214,9 +214,22 @@ def atualizar_unidade(cod_unidade: str, numero_contrato: str, nome_unidade: str,
                 WHERE cod_unidade = ?
             """, (numero_contrato, nome_unidade, estado, cidade, localizacao, cod_unidade))
             
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            salvar_banco_no_drive(caminho_banco)
-            return True
+            if cursor.rowcount > 0:
+                db.marca_sujo()
+            else:
+                logger.info(f"Nenhuma unidade encontrada com o código {cod_unidade} para atualizar, ou os dados são os mesmos.")
+                return True # Considera sucesso se não havia o que atualizar ou dados eram iguais
+
+        if getattr(db._thread_local, "dirty", False):
+            caminho_banco = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Unidade {cod_unidade} atualizada e banco salvo.")
+                return True
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após atualizar unidade {cod_unidade}: {e_save}")
+                return True # Operação local bem-sucedida
+        return True # Retorna True se não estava sujo (nenhuma alteração efetiva)
 
     except Exception as e:
         print(f"❌ Erro ao atualizar unidade: {e}")
@@ -225,13 +238,33 @@ def atualizar_unidade(cod_unidade: str, numero_contrato: str, nome_unidade: str,
 
 def deletar_unidade(cod_unidade: str) -> bool:
     try:
-        with obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM unidades WHERE cod_unidade = ?", (cod_unidade,))
-            
-            caminho_banco = Path(gettempdir()) / DB_NAME
-            salvar_banco_no_drive(caminho_banco)
-            return True
-    except Exception as e:
-        print(f"❌ Erro ao deletar unidade: {e}")
+        # Verificar se há serviços associados antes de deletar?
+        # Por simplicidade, esta função deleta diretamente.
+        with db.obter_conexao() as conn_delete:
+            cursor_delete = conn_delete.cursor()
+            # Adicionar deleção em cascata ou tratamento para tabelas dependentes (ex: servicos)
+            # Por enquanto, deleta apenas da tabela unidades.
+            cursor_delete.execute("DELETE FROM unidades WHERE cod_unidade = ?", (cod_unidade,))
+            if cursor_delete.rowcount > 0:
+                db.marca_sujo()
+                logger.info(f"Unidade {cod_unidade} deletada do banco.")
+            else:
+                logger.info(f"Unidade {cod_unidade} não encontrada no banco para deleção.")
+                # Se não encontrou no banco, não há o que marcar como sujo nem salvar.
+                return True # Considera sucesso se não havia o que deletar.
+
+        if getattr(db._thread_local, "dirty", False):
+            caminho_banco = Path(gettempdir()) / db.DB_NAME
+            try:
+                db.salvar_banco_no_drive(caminho_banco)
+                logger.info(f"Banco de dados salvo no Drive após deleção da unidade {cod_unidade}.")
+            except Exception as e_save:
+                logger.error(f"Erro ao salvar banco no Drive após deletar unidade {cod_unidade}: {e_save}")
+                # Mesmo se salvar no Drive falhar, a deleção local e no Drive (pasta) podem ter ocorrido.
+                # Retornar True, pois a principal operação no banco foi tentada.
+                return True 
+        return True # Retorna True se a operação foi bem-sucedida (ou nada a fazer)
+
+    except Exception as e_main:
+        logger.error(f"Erro ao deletar unidade {cod_unidade}: {e_main}")
         return False
