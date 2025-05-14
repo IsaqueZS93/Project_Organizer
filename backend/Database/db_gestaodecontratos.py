@@ -379,7 +379,7 @@ def atualizar_banco():
             # O commit e o reset de dirty são gerenciados pelo ConexaoContext e salvar_banco_no_drive
         
         # Se inicializar_tabelas marcou como dirty, tenta salvar.
-        if getattr(_thread_local, "dirty", False): # Checa novamente pq o contexto já resetou
+        if getattr(_thread_local, "dirty", False):
              # Se o contexto resetou, mas inicializar_tabelas FEZ algo, precisamos marcar de novo
              # No entanto, inicializar_tabelas já faz commit.
              # A questão é se o schema MUDOU e precisa de upload.
@@ -407,10 +407,10 @@ def atualizar_banco():
              # Se o contexto já limpou, e não houve outras escritas, não salvará.
              # Se inicializar_tabelas realmente ALTEROU o esquema, ela DEVE marcar dirty.
 
-            pass # A lógica de salvar é melhor nos models após operações de escrita.
-                 # Ou, se esta função é chamada em um ponto que DEVE sincronizar:
-            # marca_sujo() # Se tem certeza que quer forçar um check/save
-            # salvar_banco_no_drive(DB_PATH)
+             pass # A lógica de salvar é melhor nos models após operações de escrita.
+                  # Ou, se esta função é chamada em um ponto que DEVE sincronizar:
+             # marca_sujo() # Se tem certeza que quer forçar um check/save
+             # salvar_banco_no_drive(DB_PATH)
 
         logger.info("Verificação/atualização do banco de dados concluída.")
     except Exception as e:
