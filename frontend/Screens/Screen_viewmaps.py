@@ -3,6 +3,7 @@
 #  Visualização de Unidades no Mapa (Streamlit + PyDeck)
 #  • Mapa com rota otimizada (Nearest Neighbor)
 #  • ScatterplotLayer para marcadores claros
+#  • PathLayer para exibir a rota
 #  • Placeholder para evitar mapas duplicados
 #  • Tooltips interativos e botão de recentralização
 #  • Resumo de métricas e download de CSV
@@ -85,6 +86,7 @@ def exibir_tela_viewmaps() -> None:
     center_lat = (lat_min + lat_max) / 2
     center_lon = (lon_min + lon_max) / 2
 
+    # Zoom dinamico
     if len(df) == 1:
         zoom = 12
     else:
@@ -99,28 +101,33 @@ def exibir_tela_viewmaps() -> None:
     )
 
     # ======= Route optimization: Nearest Neighbor =======
-    def haversine(r1, c1, r2, c2):
+    def haversine(lat1, lon1, lat2, lon2):
         R = 6371.0
-        phi1, phi2 = math.radians(r1), math.radians(r2)
-        dphi = math.radians(r2 - r1)
-        dlambda = math.radians(c2 - c1)
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
         a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
         return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    coords = df[["lat","lon"]].values.tolist()
+    coords = df[["lat", "lon"]].values.tolist()
     visited = [0]
     route = [coords[0]]
     to_visit = set(range(1, len(coords)))
     while to_visit:
         last = visited[-1]
-        # find nearest
-        nearest = min(to_visit, key=lambda i: haversine(coords[last][0], coords[last][1], coords[i][0], coords[i][1]))
+        nearest = min(
+            to_visit,
+            key=lambda i: haversine(coords[last][0], coords[last][1], coords[i][0], coords[i][1])
+        )
         visited.append(nearest)
         route.append(coords[nearest])
         to_visit.remove(nearest)
-    # close loop if desired: route.append(coords[0])
 
-    # Scatter layer for points
+    # Converter rota para formato [lon, lat]
+    path = [(lon, lat) for lat, lon in route]
+    path_data = [{"path": path}]
+
+    # Scatter layer para pontos
     scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df,
@@ -129,16 +136,15 @@ def exibir_tela_viewmaps() -> None:
         get_fill_color=[255, 140, 0, 200],
         pickable=True,
     )
-    # Line layer for route
-    path_df = pd.DataFrame([
-        {"path": [(lon, lat) for lat, lon in route]}
-    ])
+
+    # PathLayer para rota
     route_layer = pdk.Layer(
-        "LineLayer",
-        data=path_df,
+        "PathLayer",
+        data=path_data,
         get_path="path",
         get_width=4,
         get_color=[0, 0, 255],
+        width_min_pixels=2,
     )
 
     # Tooltip personalizado
@@ -162,8 +168,9 @@ def exibir_tela_viewmaps() -> None:
 
     # ======= Botão Recentrar Mapa =======
     if st.button("🔄 Recentrar Mapa"):
-        deck.initial_view_state = initial_view
-        map_placeholder.pydeck_chart(deck)
+        map_placeholder.pydeck_chart(
+            pdk.Deck(layers=[scatter, route_layer], initial_view_state=initial_view, tooltip=tooltip)
+        )
 
     # ======= Tabela interativa =======
     st.subheader("Detalhes das Unidades")
