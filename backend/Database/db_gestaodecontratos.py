@@ -147,12 +147,12 @@ class ConexaoContext:
         global db_dirty
         try:
             if exc_type is None and db_dirty:
-            try:
-                self.conn.commit()
+                try:
+                    self.conn.commit()
                     logger.info("Commit realizado pelo ConexaoContext.")
                 except sqlite3.Error as e_commit:
                     logger.error(f"Erro no commit dentro do context manager: {e_commit}")
-                    if exc_val is None: 
+                    if exc_val is None:
                         raise e_commit
         finally:
             db_dirty = False
