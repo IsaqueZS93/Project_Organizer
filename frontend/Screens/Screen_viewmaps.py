@@ -85,11 +85,22 @@ def exibir_tela_viewmaps() -> None:
     center_lat = (lat_min + lat_max) / 2
     center_lon = (lon_min + lon_max) / 2
     # Zoom aproximado com base no maior spread
-    lat_diff = lat_max - lat_min
-    lon_diff = lon_max - lon_min
-    zoom = max(2, min(12, int(8 - max(lat_diff, lon_diff) * 10)))
+    if len(df) == 1:
+        zoom = 12  # nível próximo para ponto único
+    else:
+        lat_diff = lat_max - lat_min
+        lon_diff = lon_max - lon_min
+        # calcula zoom invertendo a diferença, com limites
+        spread = max(lat_diff, lon_diff)
+        # mapeia spread a zoom: menor spread = zoom maior
+        zoom = min(12, max(3, int(8 - spread * 20)))
 
     initial_view = pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=zoom,
+        pitch=0,
+    )(
         latitude=center_lat,
         longitude=center_lon,
         zoom=zoom,
