@@ -35,21 +35,32 @@ def exibir_tela_listar_unidades() -> None:
             st.info("Clique em **Mostrar unidades** para carregar a lista.")
             return
 
-    # ---------- Pré‑carrega todas para montar filtro -----------------------
+        # ---------- Pré‑carrega todas para montar filtro -----------------------
     todas_unidades = model_unidade.listar_unidades()
     if not todas_unidades:
         st.info("Nenhuma unidade cadastrada.")
         return
 
+    # monta pares (valor, rótulo) "Nº – Empresa"
     contratos_unicos = sorted({u[1] for u in todas_unidades})
-    # cria rótulos "Nº – Empresa"
-    opcoes_radio: dict[str, str] = {"Todos": "Todos"}
+    radio_values: list[str] = ["Todos"] + contratos_unicos
+    radio_labels = ["Todos"]
     for num in contratos_unicos:
         empresa = model_unidade.obter_nome_empresa_por_contrato(num) or "?"
-        opcoes_radio[num] = f"{num} – {empresa}"
+        radio_labels.append(f"{num} – {empresa}")
 
-    # exibe radio em coluna larga para layout melhor
+    # ---------- Radio de filtro -------------------------------------------
     with st.container():
+        st.markdown("### Filtro de contrato")
+        escolha_idx = st.radio(
+            label="",
+            options=list(range(len(radio_values))),  # índices internos
+            format_func=lambda i: radio_labels[i],
+            horizontal=True,
+            key="rad_contrato",
+        )
+        contrato_escolhido = radio_values[escolha_idx]
+        st.session_state["filtro_contrato_val"] = contrato_escolhido
         st.markdown("### Filtro de contrato")
         contrato_escolhido = st.radio(
             label="Selecione o contrato",
