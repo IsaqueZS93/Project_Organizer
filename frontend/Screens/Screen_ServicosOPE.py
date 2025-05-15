@@ -43,20 +43,11 @@ def exibir_tela_servicos_ope():
             value=None
         )
 
-    servicos = model_servico.listar_servicos()
-
-    # Aplica filtros
-    if filtro_status != "Todos":
-        servicos = [s for s in servicos if s[5] == filtro_status]
-    else:
-        # Filtra por status relevantes
-        servicos = [s for s in servicos if s[5] in ("Ativo", "Em andamento", "Pausada")]
-    
-    if filtro_data_inicio:
-        servicos = [s for s in servicos if s[3] and datetime.datetime.strptime(s[3], "%Y-%m-%d").date() >= filtro_data_inicio]
-    
-    if filtro_data_fim:
-        servicos = [s for s in servicos if s[3] and datetime.datetime.strptime(s[3], "%Y-%m-%d").date() <= filtro_data_fim]
+    servicos = model_servico.listar_servicos(
+        status=None if filtro_status == "Todos" else [filtro_status],
+        data_ini=filtro_data_inicio.isoformat() if filtro_data_inicio else None,
+        data_fim=filtro_data_fim.isoformat() if filtro_data_fim else None,
+    )
 
     if not servicos:
         st.info("Nenhum serviço encontrado com os filtros selecionados.")
@@ -85,40 +76,24 @@ def exibir_tela_servicos_ope():
 
                 # Seção de arquivos
                 st.markdown("---")
-                st.subheader("📎 Arquivos")
+                st.subheader("📎 Upload de Arquivos", expanded=False)
                 
-                # Upload múltiplo de arquivos
-                arquivos = st.file_uploader(
-                    "Upload de arquivos (múltiplos)",
-                    type=["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png"],
-                    accept_multiple_files=True,
-                    key=f"upload_{s[0]}"
-                )
+                with st.form(f"form_up_{s[0]}"):
+                    files = st.file_uploader("Arquivos", type=["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png"], accept_multiple_files=True)
+                    desc = st.text_input("Descrição padrão (opcional)")
+                    send = st.form_submit_button("Enviar")
                 
-                if arquivos:
-                    # Campo de descrição opcional
-                    descricao = st.text_input("Descrição para todos os arquivos (opcional)", key=f"desc_{s[0]}")
-                    
-                    if st.button("Enviar Todos", key=f"send_{s[0]}"):
-                        sucesso_total = True
-                        for arquivo in arquivos:
-                            # Trata a descrição para evitar valores nulos
-                            descricao_arquivo = descricao.strip() if descricao else None
-                            
-                            sucesso = model_servico.upload_arquivo_servico(
-                                cod_servico=s[0],
-                                arquivo=arquivo.getvalue(),
-                                nome_arquivo=arquivo.name,
-                                tipo_arquivo=arquivo.type,
-                                descricao=descricao_arquivo
-                            )
-                            if not sucesso:
-                                sucesso_total = False
-                                st.error(f"Erro ao enviar arquivo: {arquivo.name}")
-                        
-                        if sucesso_total:
-                            st.success("Todos os arquivos foram enviados com sucesso!")
-                            st.rerun()
+                if send and files:
+                    for f in files:
+                        model_servico.upload_arquivo_servico(
+                            cod_servico=s[0],
+                            arquivo=f.read(),
+                            nome_arquivo=f.name,
+                            tipo_arquivo=f.type,
+                            descricao=desc or None,
+                        )
+                    st.success("Enviados!")
+                    st.rerun()
 
                 # Lista de arquivos com filtros
                 st.subheader("Arquivos Anexados")
@@ -152,17 +127,19 @@ def exibir_tela_servicos_ope():
                     st.subheader("📁 Arquivos do Serviço")
                     
                     # Grid de arquivos
-                    cols = st.columns(4)
+                    num_cols = max(1, int(st.get_option("client.viewportWidth") / 260))
+                    cols = st.columns(num_cols)
                     for i, arquivo in enumerate(arquivos):
-                        col = cols[i % 4]
+                        col = cols[i % num_cols]
                         with col:
                             # Container para cada arquivo
                             with st.container():
                                 # Ícone baseado no tipo de arquivo
-                                if arquivo[2].startswith('image/'):
-                                    st.image("https://drive.google.com/uc?export=view&id=" + arquivo[5], use_container_width=True)
+                                if arquivo[2].startswith("image/"):
+                                    thumb = f"https://drive.google.com/thumbnail?id={arquivo[5]}"
+                                    st.image(thumb, use_container_width=True)
                                 else:
-                                    st.write(get_file_icon(arquivo[2]))
+                                    st.markdown(get_file_icon(arquivo[2]), unsafe_allow_html=True)
                                 
                                 # Nome do arquivo
                                 st.write(arquivo[1])
@@ -175,23 +152,9 @@ def exibir_tela_servicos_ope():
                                     st.write(f"📝 {arquivo[4]}")
                                 
                                 # Botão de download
-                                if st.button("⬇️ Download", key=f"download_{arquivo[0]}"):
-                                    with st.spinner("Baixando arquivo..."):
-                                        try:
-                                            arquivo_bytes = model_servico.download_arquivo_servico(arquivo[0])
-                                            if arquivo_bytes:
-                                                st.download_button(
-                                                    label="Clique para salvar",
-                                                    data=arquivo_bytes,
-                                                    file_name=arquivo[1],
-                                                    mime=arquivo[2],
-                                                    key=f"save_{arquivo[0]}"
-                                                )
-                                            else:
-                                                st.error("❌ Erro ao baixar arquivo. Tente novamente.")
-                                        except Exception as e:
-                                            st.error(f"❌ Erro ao baixar arquivo: {str(e)}")
-                                            st.error("Tente novamente.")
+                                dl_url = f"https://drive.google.com/uc?export=download&id={arquivo[5]}"
+                                st.markdown(f"[⬇️ Download]({dl_url})", unsafe_allow_html=True)
+
                 else:
                     st.info("Nenhum arquivo encontrado com os filtros selecionados.")
 

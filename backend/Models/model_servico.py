@@ -187,15 +187,32 @@ def criar_servico(cod_servico: str, cod_unidade: str, tipo_servico: str, data_cr
         return False
 
 
-def listar_servicos() -> List[Tuple]:
-    try:
-        with db.obter_conexao() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM servicos ORDER BY data_criacao DESC")
-            return cursor.fetchall()
-    except Exception as e:
-        logger.error(f"Erro ao listar serviços: {e}")
-        return []
+def listar_servicos(
+    status: list[str] | None = None,
+    data_ini: str | None = None,   # 'YYYY-MM-DD'
+    data_fim: str | None = None,
+) -> list[tuple]:
+    """
+    Retorna serviços filtrados.
+    status : lista ou None (ignora)
+    data_ini / data_fim : comparação com data_criacao
+    """
+    sql = "SELECT * FROM servicos WHERE 1=1"
+    params = []
+    if status:
+        sql += f" AND status IN ({','.join(['?']*len(status))})"
+        params.extend(status)
+    if data_ini:
+        sql += " AND data_criacao >= ?"
+        params.append(data_ini)
+    if data_fim:
+        sql += " AND data_criacao <= ?"
+        params.append(data_fim)
+    sql += " ORDER BY data_criacao DESC"
+    with db.obter_conexao() as conn:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        return cursor.fetchall()
 
 
 def buscar_servico_por_codigo(cod_servico: str) -> Optional[Tuple]:
