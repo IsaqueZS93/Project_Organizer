@@ -140,6 +140,35 @@ def exibir_tela_viewmaps() -> None:
         deck.initial_view_state = new_view
         map_placeholder.pydeck_chart(deck)
 
+    # ======= Cálculo de distâncias =======
+    from itertools import combinations
+    import math
+
+    def haversine(lat1, lon1, lat2, lon2):
+        # Raio da Terra em km
+        R = 6371.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+        return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+    # Pairwise distances
+    distancias = []
+    for (_i, u1), (_j, u2) in combinations(df.iterrows(), 2):
+        d = haversine(u1['lat'], u1['lon'], u2['lat'], u2['lon'])
+        distancias.append({
+            'Unidade 1': u1['Unidade'],
+            'Unidade 2': u2['Unidade'],
+            'Distância (km)': round(d, 2)
+        })
+    if distancias:
+        dist_df = pd.DataFrame(distancias)
+        st.subheader("Distâncias entre Unidades (km)")
+        st.dataframe(dist_df, use_container_width=True)
+    else:
+        st.info("Apenas uma unidade: nenhuma distância para calcular.")
+
     # ======= Tabela interativa =======
     st.subheader("Detalhes das Unidades")
     st.dataframe(df, use_container_width=True)
