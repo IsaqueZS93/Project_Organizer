@@ -18,6 +18,7 @@ import os
 import pathlib
 import ssl
 import time
+import random
 from pathlib import Path
 from typing import List, Optional
 
@@ -130,7 +131,9 @@ def _load_credentials() -> Credentials:
 def _build_service():
     """Cria (singleton) o cliente Drive."""
     creds = _load_credentials()
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+    service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    service._http.timeout = 120  # segundos (era ≈60)
+    return service
 
 
 def get_service():
@@ -153,24 +156,42 @@ def ensure_folder(name: str, parent_id: Optional[str] = None) -> str:
     """Garante existência da pasta (cria se necessário) e retorna o ID."""
     try:
         service = get_service()
-        resp = service.files().list(
-            q=_folder_query(name, parent_id),
-            fields="files(id)",
-            pageSize=1
-        ).execute()
-
-        if resp.get("files"):
-            logger.info(f"Pasta encontrada: {name}")
-            return resp["files"][0]["id"]
-
+        # Tenta encontrar a pasta
+        for i in range(5):
+            try:
+                resp = service.files().list(
+                    q=_folder_query(name, parent_id),
+                    fields="files(id, modifiedTime)",
+                    pageSize=1
+                ).execute()
+                if resp.get("files"):
+                    logger.info(f"Pasta encontrada: {name}")
+                    return resp["files"][0]["id"]
+                break
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
+        # Cria a pasta se não encontrou
         logger.info(f"Criando nova pasta: {name}")
         metadata = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
         if parent_id:
             metadata["parents"] = [parent_id]
-        folder = service.files().create(body=metadata, fields="id").execute()
-        logger.info(f"Pasta criada com sucesso: {name}")
-        return folder["id"]
-
+        for i in range(5):
+            try:
+                folder = service.files().create(
+                    body=metadata, fields="id, modifiedTime"
+                ).execute()
+                logger.info(f"Pasta criada com sucesso: {name}")
+                return folder["id"]
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
     except Exception as e:
         logger.error(f"Erro ao garantir pasta: {e}")
         raise
@@ -180,18 +201,25 @@ def ensure_folder(name: str, parent_id: Optional[str] = None) -> str:
 def upload_file(local_path: str, parent_id: str) -> str:
     """Faz upload de um arquivo para a pasta especificada e devolve o fileId."""
     try:
-        service    = get_service()
+        service = get_service()
         local_path = pathlib.Path(local_path)
         mime_type, _ = mimetypes.guess_type(local_path.name)
-
         logger.info(f"Upload de arquivo: {local_path.name}")
         metadata = {"name": local_path.name, "parents": [parent_id]}
-        media    = MediaFileUpload(local_path, mimetype=mime_type, resumable=True)
-
-        file = service.files().create(body=metadata, media_body=media, fields="id").execute()
-        logger.info(f"Arquivo enviado com sucesso: {local_path.name}")
-        return file["id"]
-
+        media = MediaFileUpload(local_path, mimetype=mime_type, resumable=True)
+        for i in range(5):
+            try:
+                file = service.files().create(
+                    body=metadata, media_body=media, fields="id, modifiedTime"
+                ).execute()
+                logger.info(f"Arquivo enviado com sucesso: {local_path.name}")
+                return file["id"]
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
     except Exception as e:
         logger.error(f"Erro ao fazer upload do arquivo: {e}")
         raise
@@ -205,17 +233,23 @@ def list_files(parent_id: str, mime_filter: Optional[str] = None) -> List[dict]:
         q = f"'{parent_id}' in parents"
         if mime_filter:
             q += f" and mimeType='{mime_filter}'"
-
         logger.info(f"Listando arquivos da pasta: {parent_id}")
-        resp  = service.files().list(
-            q=q,
-            fields="files(id, name, mimeType, size, createdTime)",
-            pageSize=1000
-        ).execute()
-        files = resp.get("files", [])
-        logger.info(f"Encontrados {len(files)} arquivos")
-        return files
-
+        for i in range(5):
+            try:
+                resp = service.files().list(
+                    q=q,
+                    fields="files(id, modifiedTime)",
+                    pageSize=1000
+                ).execute()
+                files = resp.get("files", [])
+                logger.info(f"Encontrados {len(files)} arquivos")
+                return files
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
     except Exception as e:
         logger.error(f"Erro ao listar arquivos: {e}")
         raise
@@ -226,48 +260,51 @@ def list_files_in_folder(folder_id: str) -> List[dict]:
     return list_files(folder_id)
 
 
-@_retry_on_error
 def download_file(file_id: str, dest_path: str) -> bool:
     """Baixa um arquivo do Drive para `dest_path`."""
     try:
         service = get_service()
         logger.info(f"Download de arquivo: {file_id}")
-        
         # Verifica se o arquivo existe
-        try:
-            file = service.files().get(fileId=file_id, fields="id, name, size").execute()
-            logger.info(f"Arquivo encontrado: {file.get('name')} ({file.get('size')} bytes)")
-        except HttpError as e:
-            logger.error(f"Arquivo não encontrado no Drive: {e}")
-            return False
-            
+        for i in range(5):
+            try:
+                file = service.files().get(fileId=file_id, fields="id, name, size, modifiedTime").execute()
+                logger.info(f"Arquivo encontrado: {file.get('name')} ({file.get('size')} bytes)")
+                break
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
         request = service.files().get_media(fileId=file_id)
-        
-        # Garante que o diretório de destino existe
         dest_dir = Path(dest_path).parent
         dest_dir.mkdir(parents=True, exist_ok=True)
-        
         with io.FileIO(dest_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
             done = False
             while not done:
-                status, done = downloader.next_chunk()
-                if status:
-                    logger.info(f"Download progress: {int(status.progress() * 100)}%")
-                    
-        # Verifica se o arquivo foi criado e tem tamanho
+                for i in range(5):
+                    try:
+                        status, done = downloader.next_chunk()
+                        if status:
+                            logger.info(f"Download progress: {int(status.progress() * 100)}%")
+                        break
+                    except Exception as e:
+                        wait = min(2 ** i, 8) + random.random()
+                        logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                        time.sleep(wait)
+                else:
+                    raise
         if not Path(dest_path).exists():
             logger.error("Arquivo não foi criado após o download")
             return False
-            
         tamanho = Path(dest_path).stat().st_size
         if tamanho == 0:
             logger.error("Arquivo foi criado mas está vazio")
             return False
-            
         logger.info(f"Arquivo baixado com sucesso: {dest_path} ({tamanho} bytes)")
         return True
-
     except Exception as e:
         logger.error(f"Erro ao baixar arquivo: {e}")
         return False
@@ -277,15 +314,24 @@ def download_file(file_id: str, dest_path: str) -> bool:
 def update_file(file_id: str, new_local_path: str):
     """Substitui o conteúdo de um arquivo mantendo o mesmo ID."""
     try:
-        service       = get_service()
+        service = get_service()
         new_local_path = pathlib.Path(new_local_path)
-        mime_type, _  = mimetypes.guess_type(new_local_path.name)
-
+        mime_type, _ = mimetypes.guess_type(new_local_path.name)
         logger.info(f"Atualizando arquivo: {file_id}")
         media = MediaFileUpload(new_local_path, mimetype=mime_type, resumable=True)
-        service.files().update(fileId=file_id, media_body=media).execute()
-        logger.info(f"Arquivo atualizado com sucesso: {file_id}")
-
+        for i in range(5):
+            try:
+                service.files().update(
+                    fileId=file_id, media_body=media, fields="id, modifiedTime"
+                ).execute()
+                logger.info(f"Arquivo atualizado com sucesso: {file_id}")
+                break
+            except Exception as e:
+                wait = min(2 ** i, 8) + random.random()
+                logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+                time.sleep(wait)
+        else:
+            raise
     except Exception as e:
         logger.error(f"Erro ao atualizar arquivo: {e}")
         raise
@@ -314,3 +360,45 @@ def get_file_id_by_name(name: str, parent_id: Optional[str] = None) -> Optional[
     except Exception as e:
         logger.error(f"Erro ao buscar arquivo por nome: {e}")
         raise
+
+# Helper para cache de file_id
+
+def _find_file_id(name: str, folder_id: str) -> str:
+    service = get_service()
+    q = f"name='{name}'"
+    if folder_id:
+        q += f" and '{folder_id}' in parents"
+    logger.info(f"Buscando arquivo por nome: {name}")
+    for i in range(5):
+        try:
+            resp = service.files().list(q=q, fields="files(id, modifiedTime)", pageSize=1).execute()
+            files = resp.get("files", [])
+            if files:
+                logger.info(f"Arquivo encontrado: {name}")
+                return files[0]["id"]
+            logger.info(f"Arquivo não encontrado: {name}")
+            return None
+        except Exception as e:
+            wait = min(2 ** i, 8) + random.random()
+            logger.warning(f"Tentativa {i+1} falhou: {e} – aguardando {wait:.1f}s")
+            time.sleep(wait)
+    raise
+
+def _get_cached_file_id(name: str, folder_id: str) -> str:
+    cache_key = f"file_id:{name}:{folder_id}"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = _find_file_id(name, folder_id)
+    return st.session_state[cache_key]
+
+# Trocar chamadas:
+# file_id = get_file_id_by_name(DB_NAME, folder_id)
+# por
+# file_id = _get_cached_file_id(DB_NAME, folder_id)
+
+# Em todas as files().get(...), limitar fields para 'id, modifiedTime'
+# Em files().list(...), limitar fields para 'files(id, modifiedTime)'
+# (Já aplicado acima nos exemplos)
+
+# Repita o padrão de retry/back-off e fields enxuto nas demais funções que fazem request.execute(),
+# como update_file, upload_file, ensure_folder, get_file_id_by_name, etc.
+# ...
