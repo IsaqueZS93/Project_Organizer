@@ -119,42 +119,37 @@ def exibir_tela_servicos_ope():
                 # Aplica filtros nos arquivos
                 if filtro_tipo != "Todos":
                     arquivos = [a for a in arquivos if a[2].split('/')[-1] == filtro_tipo]
-                
                 if filtro_data:
                     arquivos = [a for a in arquivos if a[3] and datetime.datetime.strptime(a[3], "%Y-%m-%d %H:%M:%S").date() == filtro_data]
 
                 if arquivos:
                     st.subheader("📁 Arquivos do Serviço")
-                    
-                    # Grid de arquivos
                     num_cols = max(1, int(st.get_option("client.viewportWidth") / 260))
                     cols = st.columns(num_cols)
                     for i, arquivo in enumerate(arquivos):
                         col = cols[i % num_cols]
                         with col:
-                            # Container para cada arquivo
                             with st.container():
-                                # Ícone baseado no tipo de arquivo
-                                if arquivo[2].startswith("image/"):
-                                    thumb = f"https://drive.google.com/thumbnail?id={arquivo[5]}"
-                                    st.image(thumb, use_container_width=True)
-                                else:
-                                    st.markdown(get_file_icon(arquivo[2]), unsafe_allow_html=True)
-                                
-                                # Nome do arquivo
-                                st.write(arquivo[1])
-                                
-                                # Data de upload
-                                st.write(f"📅 {arquivo[3]}")
-                                
-                                # Descrição (se houver)
-                                if arquivo[4]:
-                                    st.write(f"📝 {arquivo[4]}")
-                                
-                                # Botão de download
-                                dl_url = f"https://drive.google.com/uc?export=download&id={arquivo[5]}"
-                                st.markdown(f"[⬇️ Download]({dl_url})", unsafe_allow_html=True)
-
+                                # Checagem robusta para evitar TypeError
+                                try:
+                                    tipo_arquivo = arquivo[2] if len(arquivo) > 2 else ''
+                                    drive_file_id = arquivo[5] if len(arquivo) > 5 else ''
+                                    if tipo_arquivo.startswith("image/") and drive_file_id:
+                                        thumb = f"https://drive.google.com/thumbnail?id={drive_file_id}"
+                                        st.image(thumb, use_container_width=True)
+                                    else:
+                                        st.markdown(get_file_icon(tipo_arquivo), unsafe_allow_html=True)
+                                    st.write(arquivo[1] if len(arquivo) > 1 else "(sem nome)")
+                                    st.write(f"📅 {arquivo[3] if len(arquivo) > 3 else ''}")
+                                    if len(arquivo) > 4 and arquivo[4]:
+                                        st.write(f"📝 {arquivo[4]}")
+                                    if drive_file_id:
+                                        dl_url = f"https://drive.google.com/uc?export=download&id={drive_file_id}"
+                                        st.markdown(f"[⬇️ Download]({dl_url})", unsafe_allow_html=True)
+                                    else:
+                                        st.info("Arquivo sem ID do Drive para download.")
+                                except Exception as e:
+                                    st.error(f"Erro ao exibir arquivo: {e}")
                 else:
                     st.info("Nenhum arquivo encontrado com os filtros selecionados.")
 
