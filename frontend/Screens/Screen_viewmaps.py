@@ -3,6 +3,7 @@
 #  Visualização de Unidades no Mapa (Streamlit + PyDeck)
 #  • Mapa centralizado entre pontos
 #  • ScatterplotLayer para marcadores claros
+#  • Linha de rota ligando todas as unidades na ordem
 #  • Placeholder para evitar mapas duplicados
 #  • Tooltips interativos e botão de recentralização
 #  • Resumo de métricas e download de CSV
@@ -13,6 +14,8 @@ from __future__ import annotations
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
+import math
+from itertools import combinations
 
 from Models import model_contrato, model_unidade
 
@@ -65,10 +68,9 @@ def exibir_tela_viewmaps() -> None:
     df = pd.DataFrame(dados)
 
     # ======= Indicadores resumidos =======
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     col1.metric("Total de Unidades", len(df))
     col2.metric("Estados Distintos", df["Estado"].nunique())
-    col3.metric("Latitude Média", round(df["lat"].mean(), 4))
 
     # ======= Download CSV =======
     csv = df.to_csv(index=False).encode("utf-8")
@@ -110,6 +112,16 @@ def exibir_tela_viewmaps() -> None:
         pickable=True,
     )
 
+    # Layer de rota conectando pontos em sequência
+    path = [{"path": list(zip(df["lon"], df["lat"]))}]
+    route_layer = pdk.Layer(
+        "LineLayer",
+        data=path,
+        get_path="path",
+        get_width=4,
+        get_color=[0, 0, 255],
+    )
+
     # Tooltip personalizado
     tooltip = {
         "html": (
@@ -123,7 +135,7 @@ def exibir_tela_viewmaps() -> None:
     # Placeholder para o mapa
     map_placeholder = st.empty()
     deck = pdk.Deck(
-        layers=[scatter],
+        layers=[scatter, route_layer],
         initial_view_state=initial_view,
         tooltip=tooltip,
     )
@@ -131,29 +143,18 @@ def exibir_tela_viewmaps() -> None:
 
     # ======= Botão Recentrar Mapa =======
     if st.button("🔄 Recentrar Mapa"):
-        new_view = pdk.ViewState(
-            latitude=center_lat,
-            longitude=center_lon,
-            zoom=zoom,
-            pitch=0,
-        )
-        deck.initial_view_state = new_view
+        deck.initial_view_state = initial_view
         map_placeholder.pydeck_chart(deck)
 
     # ======= Cálculo de distâncias =======
-    from itertools import combinations
-    import math
-
     def haversine(lat1, lon1, lat2, lon2):
-        # Raio da Terra em km
         R = 6371.0
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        phi1, phi2 = map(math.radians, (lat1, lat2))
         dphi = math.radians(lat2 - lat1)
         dlambda = math.radians(lon2 - lon1)
         a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
         return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
-    # Pairwise distances
     distancias = []
     for (_i, u1), (_j, u2) in combinations(df.iterrows(), 2):
         d = haversine(u1['lat'], u1['lon'], u2['lat'], u2['lon'])
