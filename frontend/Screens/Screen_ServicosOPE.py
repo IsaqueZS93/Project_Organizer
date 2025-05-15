@@ -124,7 +124,7 @@ def exibir_tela_servicos_ope():
 
                 if arquivos:
                     st.subheader("📁 Arquivos do Serviço")
-                    num_cols = max(1, int(st.get_option("client.viewportWidth") / 260))
+                    num_cols = 3  # Valor fixo para evitar erro de configuração
                     cols = st.columns(num_cols)
                     for i, arquivo in enumerate(arquivos):
                         col = cols[i % num_cols]
