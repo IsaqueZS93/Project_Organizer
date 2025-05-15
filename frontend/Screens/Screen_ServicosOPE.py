@@ -144,10 +144,12 @@ def exibir_tela_servicos_ope():
                                     if len(arquivo) > 4 and arquivo[4]:
                                         st.write(f"📝 {arquivo[4]}")
                                     if drive_file_id:
-                                        # Download pelo backend (lógica antiga)
-                                        download = st.download_button(
+                                        # Download pelo backend (lógica antiga, corrigido)
+                                        download_result = model_servico.download_arquivo_servico(arquivo[0])
+                                        file_bytes = download_result[0] if download_result else b""
+                                        st.download_button(
                                             label="⬇️ Download",
-                                            data=lambda: model_servico.download_arquivo_servico(arquivo[0])[0] if model_servico.download_arquivo_servico(arquivo[0]) else b"",
+                                            data=file_bytes,
                                             file_name=arquivo[1] if len(arquivo) > 1 else "arquivo",
                                             mime=tipo_arquivo or "application/octet-stream",
                                             key=f"download_{arquivo[0]}"
