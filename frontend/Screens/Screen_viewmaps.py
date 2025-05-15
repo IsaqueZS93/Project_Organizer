@@ -1,9 +1,8 @@
 # frontend/Screens/Screen_ViewMaps.py
 # -----------------------------------------------------------------------------
 #  Visualização de Unidades no Mapa (Streamlit + PyDeck)
-#  • Mapa centralizado entre pontos
+#  • Mapa com rota otimizada (Nearest Neighbor)
 #  • ScatterplotLayer para marcadores claros
-#  • Linha de rota ligando todas as unidades na ordem
 #  • Placeholder para evitar mapas duplicados
 #  • Tooltips interativos e botão de recentralização
 #  • Resumo de métricas e download de CSV
@@ -15,7 +14,6 @@ import streamlit as st
 import pandas as pd
 import pydeck as pdk
 import math
-from itertools import combinations
 
 from Models import model_contrato, model_unidade
 
@@ -90,9 +88,7 @@ def exibir_tela_viewmaps() -> None:
     if len(df) == 1:
         zoom = 12
     else:
-        lat_diff = lat_max - lat_min
-        lon_diff = lon_max - lon_min
-        spread = max(lat_diff, lon_diff)
+        spread = max(lat_max - lat_min, lon_max - lon_min)
         zoom = min(12, max(3, int(8 - spread * 20)))
 
     initial_view = pdk.ViewState(
@@ -102,7 +98,29 @@ def exibir_tela_viewmaps() -> None:
         pitch=0,
     )
 
-    # Layer de pontos individuais (Scatterplot)
+    # ======= Route optimization: Nearest Neighbor =======
+    def haversine(r1, c1, r2, c2):
+        R = 6371.0
+        phi1, phi2 = math.radians(r1), math.radians(r2)
+        dphi = math.radians(r2 - r1)
+        dlambda = math.radians(c2 - c1)
+        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+        return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    coords = df[["lat","lon"]].values.tolist()
+    visited = [0]
+    route = [coords[0]]
+    to_visit = set(range(1, len(coords)))
+    while to_visit:
+        last = visited[-1]
+        # find nearest
+        nearest = min(to_visit, key=lambda i: haversine(coords[last][0], coords[last][1], coords[i][0], coords[i][1]))
+        visited.append(nearest)
+        route.append(coords[nearest])
+        to_visit.remove(nearest)
+    # close loop if desired: route.append(coords[0])
+
+    # Scatter layer for points
     scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df,
@@ -111,12 +129,13 @@ def exibir_tela_viewmaps() -> None:
         get_fill_color=[255, 140, 0, 200],
         pickable=True,
     )
-
-    # Layer de rota conectando pontos em sequência
-    path = [{"path": list(zip(df["lon"], df["lat"]))}]
+    # Line layer for route
+    path_df = pd.DataFrame([
+        {"path": [(lon, lat) for lat, lon in route]}
+    ])
     route_layer = pdk.Layer(
         "LineLayer",
-        data=path,
+        data=path_df,
         get_path="path",
         get_width=4,
         get_color=[0, 0, 255],
@@ -145,30 +164,6 @@ def exibir_tela_viewmaps() -> None:
     if st.button("🔄 Recentrar Mapa"):
         deck.initial_view_state = initial_view
         map_placeholder.pydeck_chart(deck)
-
-    # ======= Cálculo de distâncias =======
-    def haversine(lat1, lon1, lat2, lon2):
-        R = 6371.0
-        phi1, phi2 = map(math.radians, (lat1, lat2))
-        dphi = math.radians(lat2 - lat1)
-        dlambda = math.radians(lon2 - lon1)
-        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
-        return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
-
-    distancias = []
-    for (_i, u1), (_j, u2) in combinations(df.iterrows(), 2):
-        d = haversine(u1['lat'], u1['lon'], u2['lat'], u2['lon'])
-        distancias.append({
-            'Unidade 1': u1['Unidade'],
-            'Unidade 2': u2['Unidade'],
-            'Distância (km)': round(d, 2)
-        })
-    if distancias:
-        dist_df = pd.DataFrame(distancias)
-        st.subheader("Distâncias entre Unidades (km)")
-        st.dataframe(dist_df, use_container_width=True)
-    else:
-        st.info("Apenas uma unidade: nenhuma distância para calcular.")
 
     # ======= Tabela interativa =======
     st.subheader("Detalhes das Unidades")
