@@ -68,7 +68,8 @@ def fetch_route(lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
     coords = f"{lon1},{lat1};{lon2},{lat2}"
     params = {"overview": "full", "geometries": "geojson"}
     try:
-        resp = session.get(f"{OSRM_URL}/{coords}", params=params, timeout=10)
+        # Already using session.get with retry and backoff
+        resp = session.get(f"{OSRM_URL}/{coords}", params=params, timeout=10)  # via get_session() with retry
         resp.raise_for_status()
         data = resp.json()
         route = data["routes"][0]
@@ -184,4 +185,3 @@ def exibir_tela_viewmaps() -> None:
 
     st.subheader("Detalhes das Unidades")
     st.dataframe(df, use_container_width=True)
-# nada 2
