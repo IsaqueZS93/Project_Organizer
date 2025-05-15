@@ -1,11 +1,9 @@
 # frontend/Screens/Screen_ListarUsuario.py
-# ------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 #  Lista de Usuários (Streamlit)
-#  • Carregamento sob demanda + filtros (nome / tipo)
-#  • Sem sys.path hacks; import direto
-#  • Permissões: admin pode tudo, usuário comum edita apenas o próprio registro
-#  • Usa st.query_params? → adiado p/ futura paginação; mantém sessão interna
-# ------------------------------------------------------------------------------
+#  • Lazy‑load sem filtro de NOME (apenas filtro por tipo de usuário)
+#  • Admin pode tudo; usuário comum edita apenas seu registro
+# -----------------------------------------------------------------------------
 
 from __future__ import annotations
 
@@ -18,68 +16,59 @@ from Styles.theme import aplicar_estilo_geral
 from frontend.Utils.auth import verificar_permissao_admin
 from Models import model_usuario
 
-# ------------------------------------------------------------------------------
-# 1. Helpers -------------------------------------------------------------------
-# ------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 def _pode_editar(user_login: str) -> bool:
-    """Admin pode editar tudo; caso contrário, apenas seu próprio usuário."""
     return (
         st.session_state.get("tipo") == "admin"
         or user_login == st.session_state.get("usuario")
     )
 
 
-def _carregar_usuarios(nome_filtro: str | None, tipos: List[str] | None) -> List[Tuple]:
-    """Wrapper para model_usuario.listar_usuarios() com filtros opcionais."""
-    return model_usuario.listar_usuarios(nome_like=nome_filtro, tipos=tipos)
+def _carregar_usuarios(tipos: List[str] | None) -> List[Tuple]:
+    """Busca usuários opcionalmente filtrando por tipo."""
+    return model_usuario.listar_usuarios(tipos=tipos)
 
-# ------------------------------------------------------------------------------
-# 2. Tela principal ------------------------------------------------------------
-# ------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Tela principal
+# -----------------------------------------------------------------------------
 
 def exibir_tela_listar_usuarios() -> None:
     aplicar_estilo_geral()
 
-    # ---------- Permissão -----------------------------------------------------
     if not verificar_permissao_admin():
         st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
 
     st.title("📋 Lista de Usuários")
 
-    # ---------- Filtros de busca ---------------------------------------------
-    with st.expander("🔎 Filtros de busca", expanded=False):
-        filtro_nome = st.text_input("Por nome contém", key="flt_nome")
+    # ── Filtro apenas por tipo ------------------------------------------------
+    with st.expander("🔎 Filtro por tipo", expanded=False):
         filtro_tipo = st.multiselect("Tipo", ["admin", "ope"], key="flt_tipo")
-        if st.button("Aplicar filtros", key="btn_filtros"):
+        if st.button("Aplicar", key="btn_filtro_tipo"):
             st.session_state["mostrar_usuarios"] = True
-            st.session_state["filtro_nome_val"] = filtro_nome
             st.session_state["filtro_tipo_val"] = filtro_tipo
 
-    # ---------- Botão inicial -------------------------------------------------
+    # ── Botão inicial ---------------------------------------------------------
     if "mostrar_usuarios" not in st.session_state:
         if st.button("🔍 Mostrar usuários", type="primary"):
             st.session_state["mostrar_usuarios"] = True
-            st.session_state["filtro_nome_val"] = ""
             st.session_state["filtro_tipo_val"] = []
         else:
             st.info("Clique em **Mostrar usuários** para carregar a lista.")
             return
 
-    # ---------- Carrega dados -------------------------------------------------
-    usuarios = _carregar_usuarios(
-        st.session_state.get("filtro_nome_val"),
-        st.session_state.get("filtro_tipo_val"),
-    )
+    # ── Carrega dados ---------------------------------------------------------
+    usuarios = _carregar_usuarios(st.session_state.get("filtro_tipo_val"))
 
     if not usuarios:
         st.info("Nenhum usuário encontrado com esses critérios.")
         return
 
-    # ---------- Renderização --------------------------------------------------
+    # ── Renderização ----------------------------------------------------------
     for u in usuarios:
-        # Estrutura esperada: (id, nome, usuario, tipo, funcao, senha, data_nasc)
         user_id, nome, login, tipo_u, funcao, senha, *_ = u
         with st.expander(f"👤 {nome} ({tipo_u})"):
             st.markdown(f"**Função:** {funcao or '—'}")
@@ -90,13 +79,11 @@ def exibir_tela_listar_usuarios() -> None:
                 st.markdown(f"**Senha:** {senha}")
 
             col1, col2 = st.columns(2)
-
             if _pode_editar(login):
                 with col1:
                     if st.button("✏️ Editar", key=f"edit_{user_id}"):
                         st.session_state["editando_usuario"] = u
                         st.rerun()
-
             if st.session_state.get("tipo") == "admin":
                 with col2:
                     if st.button("🗑 Excluir", key=f"del_{user_id}"):
@@ -104,12 +91,11 @@ def exibir_tela_listar_usuarios() -> None:
                         st.success("Usuário excluído com sucesso!")
                         st.rerun()
 
-    # ---------- Edição --------------------------------------------------------
+    # ── Edição ---------------------------------------------------------------
     if "editando_usuario" in st.session_state:
         st.markdown("---")
         st.subheader("✏️ Editar Usuário")
 
-        usuario = st.session_state["editando_usuario"]
         (
             user_id,
             nome_atual,
@@ -118,9 +104,8 @@ def exibir_tela_listar_usuarios() -> None:
             funcao_atual,
             senha_atual,
             data_nasc_atual,
-        ) = usuario
+        ) = st.session_state["editando_usuario"]
 
-        # Permissão final (caso o usuário perca status no meio do caminho)
         if not _pode_editar(login_atual):
             st.error("Você não tem permissão para editar este usuário.")
             st.session_state.pop("editando_usuario")
