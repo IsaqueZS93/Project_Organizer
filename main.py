@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
 import atexit
-from Database import db_gestaodecontratos as db
+from backend.Database import db_gestaodecontratos as db
 from frontend.Screens.Screen_Login import login, logout
 from frontend.Utils.auth import verificar_permissao_admin
 
