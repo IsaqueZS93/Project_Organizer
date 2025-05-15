@@ -27,6 +27,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import threading
+import streamlit as st
 
 # ─────────────────── Config logging ────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -50,8 +52,8 @@ RETRY_DELAY  = 2  # segundos
 # Arquivo local de credenciais (fallback) --------------------------------------
 CREDENTIALS_FILE = Path(__file__).parent / "gestao-de-contratos-459115-56094189aaf9.json"
 
-# Instância global do serviço --------------------------------------------------
-_service: Optional["googleapiclient.discovery.Resource"] = None
+# Cache de serviço por thread
+_thread_local = threading.local()
 
 # ─────────────────── Helpers ───────────────────────────────────────────────────
 def _retry_on_error(func):
@@ -79,7 +81,6 @@ def _load_credentials() -> Credentials:
     """
     # 1) st.secrets -------------------------------------------------------------
     try:
-        import streamlit as st  # só existe em runtime Streamlit
         if "gdrive" in st.secrets and "credentials_json" in st.secrets["gdrive"]:
             try:
                 # Tenta carregar o JSON
@@ -128,28 +129,15 @@ def _load_credentials() -> Credentials:
 
 def _build_service():
     """Cria (singleton) o cliente Drive."""
-    global _service
-    if _service is not None:
-        return _service
-
-    try:
-        logger.info("Iniciando construção do serviço Google Drive")
-        creds = _load_credentials()
-
-        _service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        # teste rápido
-        _service.files().list(pageSize=1).execute()
-        logger.info("Serviço Google Drive construído e testado com sucesso")
-        return _service
-
-    except Exception as e:
-        logger.error(f"Erro ao construir serviço do Google Drive: {e}")
-        raise
+    creds = _load_credentials()
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def get_service():
     """Interface pública para obter o cliente Drive."""
-    return _build_service()
+    if not hasattr(_thread_local, "service"):
+        _thread_local.service = _build_service()
+    return _thread_local.service
 
 
 def _folder_query(name: str, parent_id: Optional[str]) -> str:
