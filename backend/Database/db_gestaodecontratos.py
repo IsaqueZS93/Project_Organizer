@@ -124,7 +124,7 @@ def baixar_banco_do_drive():
 # ─────────────── Obter conexão com o banco ───────────────
 def obter_conexao() -> sqlite3.Connection:
     """Abre e devolve uma conexão SQLite local em modo row_factory."""
-    caminho_banco = baixar_banco_do_drive()
+        caminho_banco = baixar_banco_do_drive()
     conn = sqlite3.connect(str(caminho_banco), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -147,8 +147,8 @@ class ConexaoContext:
         global db_dirty
         try:
             if exc_type is None and db_dirty:
-                try:
-                    self.conn.commit()
+            try:
+                self.conn.commit()
                     logger.info("Commit realizado pelo ConexaoContext.")
                 except sqlite3.Error as e_commit:
                     logger.error(f"Erro no commit dentro do context manager: {e_commit}")
@@ -285,7 +285,7 @@ def salvar_banco_no_drive(caminho_banco: Path):
         folder_id = _get_drive_folder_id()
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
 
-        if file_id:
+    if file_id:
             remote_ts_before_upload = _remote_modified_ts(file_id)
             if remote_ts_before_upload > st.session_state.get("last_remote_ts", 0.0):
                 logger.warning(
@@ -302,7 +302,7 @@ def salvar_banco_no_drive(caminho_banco: Path):
             logger.info(f"Atualizando arquivo {DB_NAME} no Drive.")
             gdrive.update_file(file_id, caminho_banco)
             logger.info(f"Arquivo {DB_NAME} atualizado no Drive.")
-        else:
+    else:
             logger.info(f"Enviando novo arquivo {DB_NAME} para o Drive.")
             file_id = gdrive.upload_file(caminho_banco, folder_id) # Salva o file_id retornado
             if not file_id:

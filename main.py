@@ -109,7 +109,8 @@ opcoes_menu = [
     "📍 Lista de Unidades",
     "🛠️ Cadastro de Serviço",
     "🔧 Lista de Serviços",
-    "👷‍♂️ Serviços (OPE/Admin)"
+    "👷‍♂️ Serviços (OPE/Admin)",
+    "🗺️ Unidades no Mapa"
 ]
 
 # Adiciona opções apenas para admin
@@ -189,3 +190,6 @@ elif tela == "💾 Backup de Dados (Admin)":
         st.stop()
     from frontend.Screens.Screen_Backup import exibir_tela_backup
     exibir_tela_backup()
+elif tela == "🗺️ Unidades no Mapa":
+    from frontend.Screens.Screen_viewmaps import exibir_tela_viewmaps
+    exibir_tela_viewmaps()
