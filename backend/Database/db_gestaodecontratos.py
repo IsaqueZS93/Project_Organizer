@@ -285,7 +285,7 @@ def salvar_banco_no_drive(caminho_banco: Path):
         folder_id = _get_drive_folder_id()
         file_id = gdrive.get_file_id_by_name(DB_NAME, folder_id)
 
-    if file_id:
+        if file_id:
             remote_ts_before_upload = _remote_modified_ts(file_id)
             if remote_ts_before_upload > st.session_state.get("last_remote_ts", 0.0):
                 logger.warning(
@@ -294,7 +294,6 @@ def salvar_banco_no_drive(caminho_banco: Path):
                     f"Upload abortado para evitar perda de dados."
                 )
                 # Mostrar erro para o usuário no Streamlit
-                # É crucial que esta mensagem seja visível se stiver em um contexto Streamlit
                 if hasattr(st, 'error'):
                     st.error(f"Conflito ao salvar: alterações remotas detectadas. Suas últimas alterações não foram salvas na nuvem para evitar sobrescrever dados. Por favor, recarregue a página e tente novamente.")
                 return # Aborta o upload
@@ -302,26 +301,22 @@ def salvar_banco_no_drive(caminho_banco: Path):
             logger.info(f"Atualizando arquivo {DB_NAME} no Drive.")
             gdrive.update_file(file_id, caminho_banco)
             logger.info(f"Arquivo {DB_NAME} atualizado no Drive.")
-    else:
+        else:
             logger.info(f"Enviando novo arquivo {DB_NAME} para o Drive.")
             file_id = gdrive.upload_file(caminho_banco, folder_id) # Salva o file_id retornado
             if not file_id:
                 logger.error(f"Falha ao fazer upload do novo arquivo {DB_NAME} para o Drive.")
                 return # Aborta se o upload falhar
             logger.info(f"Novo arquivo {DB_NAME} enviado ao Drive com ID: {file_id}.")
-        
-        # Atualiza o timestamp da última versão remota conhecida com o timestamp do arquivo que acabou de ser salvo/criado.
-        # Isso é importante para a próxima verificação de conflito.
-        if file_id: # Garante que file_id não é None (caso upload_file falhe e retorne None)
-             new_remote_ts = _remote_modified_ts(file_id)
-             st.session_state["last_remote_ts"] = new_remote_ts
-             logger.info(f"Timestamp remoto atualizado para: {new_remote_ts}")
-        else: # Caso de falha no upload inicial onde file_id pode não ser retornado.
-             st.session_state["last_remote_ts"] = time.time() # Fallback para tempo atual
-             logger.warning("Não foi possível obter o file_id após o upload, usando time.time() para last_remote_ts.")
 
-        # A flag 'dirty' agora é resetada no __exit__ do ConexaoContext.
-        # setattr(_thread_local, "dirty", False) # Upload bem-sucedido, banco não está mais sujo (movido)
+        # Atualiza o timestamp da última versão remota conhecida com o timestamp do arquivo que acabou de ser salvo/criado.
+        if file_id: # Garante que file_id não é None (caso upload_file falhe e retorne None)
+            new_remote_ts = _remote_modified_ts(file_id)
+            st.session_state["last_remote_ts"] = new_remote_ts
+            logger.info(f"Timestamp remoto atualizado para: {new_remote_ts}")
+        else: # Caso de falha no upload inicial onde file_id pode não ser retornado.
+            st.session_state["last_remote_ts"] = time.time() # Fallback para tempo atual
+            logger.warning("Não foi possível obter o file_id após o upload, usando time.time() para last_remote_ts.")
 
     except gdrive.googleapiclient.errors.HttpError as e:
         logger.error(f"Erro de API do Google ao salvar banco no Drive: {str(e)}")
