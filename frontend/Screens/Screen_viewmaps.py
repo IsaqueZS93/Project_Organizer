@@ -1,8 +1,10 @@
 # frontend/Screens/Screen_ViewMaps.py
 # -----------------------------------------------------------------------------
 #  Visualização de Unidades no Mapa (Streamlit + PyDeck)
-#  • Mapa customizado com cluster e pontos
-#  • Tooltips interativos
+#  • Mapa centralizado entre pontos
+#  • ScatterplotLayer para marcadores claros
+#  • Placeholder para evitar mapas duplicados
+#  • Tooltips interativos e botão de recentralização
 #  • Resumo de métricas e download de CSV
 # -----------------------------------------------------------------------------
 
@@ -66,7 +68,6 @@ def exibir_tela_viewmaps() -> None:
     col1, col2, col3 = st.columns(3)
     col1.metric("Total de Unidades", len(df))
     col2.metric("Estados Distintos", df["Estado"].nunique())
-    # Média de latitude (exemplo de indicador adicional)
     col3.metric("Latitude Média", round(df["lat"].mean(), 4))
 
     # ======= Download CSV =======
@@ -78,36 +79,30 @@ def exibir_tela_viewmaps() -> None:
         mime="text/csv"
     )
 
-    # ======= PyDeck Map =======
-    # Cálculo do centro e zoom inicial
-    mid_lat = df["lat"].mean()
-    mid_lon = df["lon"].mean()
-    view_state = pdk.ViewState(
-        latitude=mid_lat,
-        longitude=mid_lon,
-        zoom=7,
-        pitch=40,
+    # ======= Cálculo de bounding box e view_state =======
+    lat_min, lat_max = df["lat"].min(), df["lat"].max()
+    lon_min, lon_max = df["lon"].min(), df["lon"].max()
+    center_lat = (lat_min + lat_max) / 2
+    center_lon = (lon_min + lon_max) / 2
+    # Zoom aproximado com base no maior spread
+    lat_diff = lat_max - lat_min
+    lon_diff = lon_max - lon_min
+    zoom = max(2, min(12, int(8 - max(lat_diff, lon_diff) * 10)))
+
+    initial_view = pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=zoom,
+        pitch=0,
     )
 
-    # Layer de cluster (HexagonLayer)
-    hex_layer = pdk.Layer(
-        "HexagonLayer",
-        data=df,
-        get_position=["lon", "lat"],
-        radius=500,
-        elevation_scale=50,
-        elevation_range=[0, 3000],
-        pickable=True,
-        extruded=True,
-    )
-
-    # Layer de pontos individuais
-    scatter_layer = pdk.Layer(
+    # Layer de pontos individuais (Scatterplot)
+    scatter = pdk.Layer(
         "ScatterplotLayer",
         data=df,
         get_position=["lon", "lat"],
-        get_fill_color=[255, 140, 0, 200],
         get_radius=200,
+        get_fill_color=[255, 140, 0, 200],
         pickable=True,
     )
 
@@ -121,28 +116,25 @@ def exibir_tela_viewmaps() -> None:
         "style": {"backgroundColor": "#F0F0F0", "color": "#000000"},
     }
 
+    # Placeholder para o mapa
+    map_placeholder = st.empty()
     deck = pdk.Deck(
-        layers=[hex_layer, scatter_layer],
-        initial_view_state=view_state,
+        layers=[scatter],
+        initial_view_state=initial_view,
         tooltip=tooltip,
     )
-    st.pydeck_chart(deck)
+    map_placeholder.pydeck_chart(deck)
 
-    # ======= Zoom to fit =======
+    # ======= Botão Recentrar Mapa =======
     if st.button("🔄 Recentrar Mapa"):
-        # Recalcula view_state baseado em bounding box
-        lat_min, lat_max = df["lat"].min(), df["lat"].max()
-        lon_min, lon_max = df["lon"].min(), df["lon"].max()
-        # Centro
-        new_center_lat = (lat_min + lat_max) / 2
-        new_center_lon = (lon_min + lon_max) / 2
-        # Aproximação de zoom com base no spread (muito simplificado)
-        lat_diff = lat_max - lat_min
-        zoom = max(2, min(12, int(8 - lat_diff * 10)))
-        deck.initial_view_state.latitude = new_center_lat
-        deck.initial_view_state.longitude = new_center_lon
-        deck.initial_view_state.zoom = zoom
-        st.pydeck_chart(deck)
+        new_view = pdk.ViewState(
+            latitude=center_lat,
+            longitude=center_lon,
+            zoom=zoom,
+            pitch=0,
+        )
+        deck.initial_view_state = new_view
+        map_placeholder.pydeck_chart(deck)
 
     # ======= Tabela interativa =======
     st.subheader("Detalhes das Unidades")
