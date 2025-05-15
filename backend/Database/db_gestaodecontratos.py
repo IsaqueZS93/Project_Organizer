@@ -26,12 +26,15 @@ DB_NAME = "db_gestaodecontratos.db"
 DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
 # _last_remote_ts: float = 0.0   # Removido - será usado st.session_state
 
-# Cache de conexão por thread
-_thread_local = threading.local()
+# Remover cache de conexão por thread
+# _thread_local = threading.local()  # Removido
+
+db_dirty = False  # Flag global para indicar se o banco está "sujo"
 
 def marca_sujo() -> None:
-    """Marca o banco como modificado na thread atual."""
-    setattr(_thread_local, "dirty", True)
+    """Marca o banco como modificado (dirty)."""
+    global db_dirty
+    db_dirty = True
 
 def _remote_modified_ts(file_id: str) -> float:
     """Obtém o timestamp de modificação de um arquivo no Google Drive."""
@@ -120,42 +123,16 @@ def baixar_banco_do_drive():
 
 # ─────────────── Obter conexão com o banco ───────────────
 def obter_conexao() -> sqlite3.Connection:
-    """Obtém uma conexão com o banco de dados"""
-    try:
-        if not hasattr(_thread_local, 'conn') or _thread_local.conn is None:
-            caminho_banco_local = baixar_banco_do_drive()
-            novo = not caminho_banco_local.exists() or caminho_banco_local.stat().st_size == 0
-
-            _thread_local.conn = sqlite3.connect(str(caminho_banco_local))
-            _thread_local.conn.row_factory = sqlite3.Row
-            _thread_local.dirty = False 
-            
-            if novo:
-                logger.info(f"Banco de dados não encontrado ou vazio em {caminho_banco_local}, inicializando tabelas.")
-                inicializar_tabelas(_thread_local.conn)
-                _thread_local.conn.commit()
-                _thread_local.dirty = True 
-                logger.info("Banco de dados inicializado e marcado como 'dirty'. Será salvo no Drive na próxima operação de escrita.")
-        
-        return _thread_local.conn
-    except Exception as e:
-        logger.error(f"Erro ao conectar ao banco de dados: {str(e)}")
-        raise
+    """Abre e devolve uma conexão SQLite local em modo row_factory."""
+    caminho_banco = baixar_banco_do_drive()
+    conn = sqlite3.connect(str(caminho_banco), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ─────────────── Fechar conexão ───────────────
 def fechar_conexao():
-    """Fecha a conexão da thread atual"""
-    if hasattr(_thread_local, 'conn') and _thread_local.conn is not None: # Adicionado cheque de None
-        try:
-            _thread_local.conn.close()
-        except sqlite3.Error:
-            pass # Pode já estar fechada ou em estado inválido
-        finally:
-            # Remove conn de _thread_local para que obter_conexao() crie uma nova na próxima vez.
-            delattr(_thread_local, 'conn') 
-            if hasattr(_thread_local, 'dirty'): # Limpa a flag dirty também se existir
-                delattr(_thread_local, 'dirty')
-
+    """Mantida por compatibilidade; conexões são fechadas no próprio with."""
+    pass
 
 # ─────────────── Contexto de conexão ───────────────
 class ConexaoContext:
@@ -167,29 +144,20 @@ class ConexaoContext:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        global db_dirty
         try:
-            # Só faz commit se não houve exceção DENTRO do bloco 'with' E se o banco está 'dirty'.
-            if exc_type is None and getattr(_thread_local, "dirty", False):
+            if exc_type is None and db_dirty:
                 try:
                     self.conn.commit()
                     logger.info("Commit realizado pelo ConexaoContext.")
                 except sqlite3.Error as e_commit:
                     logger.error(f"Erro no commit dentro do context manager: {e_commit}")
-                    # Se não havia uma exceção original (exc_val is None),
-                    # propaga o erro do commit. Caso contrário, a exceção original (exc_val)
-                    # já será propagada automaticamente ao sair do __exit__.
                     if exc_val is None: 
-                        raise e_commit # Propaga o erro de commit como a exceção primária.
-            # Se uma exceção ocorreu no bloco 'with' (exc_type is not None), o commit não é tentado.
-            # A flag 'dirty' permanecerá True (correto, pois as alterações não foram salvas).
-            # Se não estava 'dirty', nada precisa ser feito em termos de commit.
+                        raise e_commit
         finally:
-            # Reseta a flag 'dirty' ao sair do contexto, independentemente de commit ou exceção.
-            # Esta é a principal mudança solicitada: garantir que 'dirty' seja False para a próxima
-            # vez que o contexto for usado no mesmo thread, a menos que uma nova operação de escrita ocorra.
-            setattr(_thread_local, "dirty", False)
-            logger.debug("Flag 'dirty' resetada para False ao sair do ConexaoContext.")
-        # A conexão não é fechada aqui; fechar_conexao() pode ser chamado explicitamente.
+            db_dirty = False
+            logger.debug("Flag 'db_dirty' resetada para False ao sair do ConexaoContext.")
+        self.conn.close()  # Fecha a conexão ao sair do contexto
 
 # ─────────────── Função de contexto ───────────────
 def conexao():
@@ -309,7 +277,7 @@ def salvar_banco_no_drive(caminho_banco: Path):
     """Salva o banco de dados local no Google Drive se estiver marcado como 'dirty' e não houver conflitos."""
     st.session_state.setdefault("last_remote_ts", 0.0)
 
-    if not getattr(_thread_local, "dirty", False):
+    if not db_dirty:
         logger.info("Banco de dados não está 'dirty', upload para o Drive evitado.")
         return
 
@@ -379,7 +347,7 @@ def atualizar_banco():
             # O commit e o reset de dirty são gerenciados pelo ConexaoContext e salvar_banco_no_drive
         
         # Se inicializar_tabelas marcou como dirty, tenta salvar.
-        if getattr(_thread_local, "dirty", False):
+        if db_dirty:
              # Se o contexto resetou, mas inicializar_tabelas FEZ algo, precisamos marcar de novo
              # No entanto, inicializar_tabelas já faz commit.
              # A questão é se o schema MUDOU e precisa de upload.
@@ -459,7 +427,7 @@ if __name__ == "__main__":
         # Simula uma escrita para testar a flag dirty
         # marca_sujo() 
         # logger.info(f"Após marca_sujo, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}")
-    logger.info(f"Após sair do contexto, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
+    logger.info(f"Após sair do contexto, _thread_local.dirty: {db_dirty}") # Deve ser False
 
     fechar_conexao() # Testa o fechamento explícito
     logger.info(f"Após fechar_conexao, hasattr(_thread_local, 'conn'): {hasattr(_thread_local, 'conn')}") # Deve ser False
@@ -467,8 +435,8 @@ if __name__ == "__main__":
     logger.info("Reabrindo conexão para teste...")
     with conexao() as conn_test_2:
         logger.info(f"Segunda conexão obtida: {conn_test_2}")
-        logger.info(f"Na segunda conexão, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
-    logger.info(f"Após sair do segundo contexto, _thread_local.dirty: {getattr(_thread_local, 'dirty', 'N/A')}") # Deve ser False
+        logger.info(f"Na segunda conexão, _thread_local.dirty: {db_dirty}") # Deve ser False
+    logger.info(f"Após sair do segundo contexto, _thread_local.dirty: {db_dirty}") # Deve ser False
 
 
     # Exemplo: Como usar obter_conexao e fechar_conexao sem o context manager
