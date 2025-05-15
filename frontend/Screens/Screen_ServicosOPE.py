@@ -76,7 +76,7 @@ def exibir_tela_servicos_ope():
 
                 # Seção de arquivos
                 st.markdown("---")
-                st.subheader("📎 Upload de Arquivos", expanded=False)
+                st.subheader("�� Upload de Arquivos")
                 
                 with st.form(f"form_up_{s[0]}"):
                     files = st.file_uploader("Arquivos", type=["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png"], accept_multiple_files=True)
