@@ -124,7 +124,7 @@ def baixar_banco_do_drive():
 # ─────────────── Obter conexão com o banco ───────────────
 def obter_conexao() -> sqlite3.Connection:
     """Abre e devolve uma conexão SQLite local em modo row_factory."""
-        caminho_banco = baixar_banco_do_drive()
+    caminho_banco = baixar_banco_do_drive()
     conn = sqlite3.connect(str(caminho_banco), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
