@@ -144,8 +144,14 @@ def exibir_tela_servicos_ope():
                                     if len(arquivo) > 4 and arquivo[4]:
                                         st.write(f"📝 {arquivo[4]}")
                                     if drive_file_id:
-                                        dl_url = f"https://drive.google.com/uc?export=download&id={drive_file_id}"
-                                        st.markdown(f"[⬇️ Download]({dl_url})", unsafe_allow_html=True)
+                                        # Download pelo backend (lógica antiga)
+                                        download = st.download_button(
+                                            label="⬇️ Download",
+                                            data=lambda: model_servico.download_arquivo_servico(arquivo[0])[0] if model_servico.download_arquivo_servico(arquivo[0]) else b"",
+                                            file_name=arquivo[1] if len(arquivo) > 1 else "arquivo",
+                                            mime=tipo_arquivo or "application/octet-stream",
+                                            key=f"download_{arquivo[0]}"
+                                        )
                                     else:
                                         st.info("Arquivo sem ID do Drive para download.")
                                 except Exception as e:
