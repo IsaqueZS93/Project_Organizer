@@ -20,13 +20,14 @@ from Models import model_unidade
 def exibir_tela_listar_unidades() -> None:
     aplicar_estilo_geral()
 
+    # ---- proteção ---------------------------------------------------------
     if not verificar_permissao_admin():
         st.error("Acesso negado. Esta tela é restrita para administradores.")
         st.stop()
 
     st.title("🏗️ Lista de Unidades")
 
-    # ---------- Botão inicial ----------------------------------------------
+    # ---- botão inicial ----------------------------------------------------
     if "mostrar_unidades" not in st.session_state:
         if st.button("🔍 Mostrar unidades", type="primary"):
             st.session_state["mostrar_unidades"] = True
@@ -35,53 +36,41 @@ def exibir_tela_listar_unidades() -> None:
             st.info("Clique em **Mostrar unidades** para carregar a lista.")
             return
 
-        # ---------- Pré‑carrega todas para montar filtro -----------------------
-    todas_unidades = model_unidade.listar_unidades()
-    if not todas_unidades:
+    # ---- carrega todas para montar filtro ---------------------------------
+    todas = model_unidade.listar_unidades()
+    if not todas:
         st.info("Nenhuma unidade cadastrada.")
         return
 
-    # monta pares (valor, rótulo) "Nº – Empresa"
-    contratos_unicos = sorted({u[1] for u in todas_unidades})
-    radio_values: list[str] = ["Todos"] + contratos_unicos
-    radio_labels = ["Todos"]
-    for num in contratos_unicos:
-        empresa = model_unidade.obter_nome_empresa_por_contrato(num) or "?"
-        radio_labels.append(f"{num} – {empresa}")
+    contratos = sorted({u[1] for u in todas})
+    radio_vals = ["Todos"] + contratos
+    radio_labels = ["Todos"] + [
+        f"{num} – {model_unidade.obter_nome_empresa_por_contrato(num) or '?'}"
+        for num in contratos
+    ]
 
-    # ---------- Radio de filtro -------------------------------------------
+    # ---- radio filtro -----------------------------------------------------
     with st.container():
-        st.markdown("### Filtro de contrato")
-        escolha_idx = st.radio(
-            label="",
-            options=list(range(len(radio_values))),  # índices internos
+        st.markdown("### Filtro por contrato")
+        idx = st.radio(
+            label="",  # vazio, escondemos label
+            options=list(range(len(radio_vals))),
             format_func=lambda i: radio_labels[i],
             horizontal=True,
             key="rad_contrato",
+            label_visibility="collapsed",
         )
-        contrato_escolhido = radio_values[escolha_idx]
-        st.session_state["filtro_contrato_val"] = contrato_escolhido
-        st.markdown("### Filtro de contrato")
-        contrato_escolhido = st.radio(
-            label="Selecione o contrato",
-            options=list(opcoes_radio.keys()),
-            format_func=lambda k: opcoes_radio[k],
-            horizontal=True,
-            key="rad_contrato",
-        )
-        st.session_state["filtro_contrato_val"] = contrato_escolhido
+        contrato_sel = radio_vals[idx]
+        st.session_state["filtro_contrato_val"] = contrato_sel
 
-    # ---------- Lista conforme filtro --------------------------------------
-    if contrato_escolhido == "Todos":
-        unidades = todas_unidades
-    else:
-        unidades = model_unidade.listar_unidades(numero_contrato=contrato_escolhido)
+    # ---- obtém lista conforme filtro --------------------------------------
+    unidades = todas if contrato_sel == "Todos" else model_unidade.listar_unidades(contrato_sel)
 
     if not unidades:
         st.info("Nenhuma unidade encontrada para este contrato.")
         return
 
-    # ---------- Renderização ----------------------------------------------
+    # ---- renderização -----------------------------------------------------
     for cod, contrato, nome, estado, cidade, local in unidades:
         with st.expander(f"🏢 {nome} – {cod}"):
             st.markdown(f"**Contrato:** {contrato}")
@@ -101,7 +90,7 @@ def exibir_tela_listar_unidades() -> None:
                         st.success("Unidade excluída com sucesso! A pasta no Drive permanece intacta.")
                     st.rerun()
 
-    # ---------- Formulário de edição ---------------------------------------
+    # ---- edição -----------------------------------------------------------
     if "editando_unidade" in st.session_state:
         cod, contrato, nome_cur, est_cur, cid_cur, loc_cur = st.session_state["editando_unidade"]
         st.markdown("---")
@@ -112,20 +101,18 @@ def exibir_tela_listar_unidades() -> None:
             estado_edit = st.text_input("Estado", value=est_cur)
             cidade_edit = st.text_input("Cidade", value=cid_cur)
             local_edit = st.text_input("Localização", value=loc_cur)
-            enviar = st.form_submit_button("Salvar alterações")
-
-        if enviar:
-            ok = model_unidade.atualizar_unidade(
-                cod_unidade=cod,
-                numero_contrato=contrato,
-                nome_unidade=nome_edit,
-                estado=estado_edit,
-                cidade=cidade_edit,
-                localizacao=local_edit,
-            )
-            if ok:
-                st.success("Unidade atualizada com sucesso!")
-                st.session_state.pop("editando_unidade")
-                st.rerun()
-            else:
-                st.error("Erro ao atualizar unidade.")
+            if st.form_submit_button("Salvar alterações"):
+                ok = model_unidade.atualizar_unidade(
+                    cod_unidade=cod,
+                    numero_contrato=contrato,
+                    nome_unidade=nome_edit,
+                    estado=estado_edit,
+                    cidade=cidade_edit,
+                    localizacao=local_edit,
+                )
+                if ok:
+                    st.success("Unidade atualizada com sucesso!")
+                    st.session_state.pop("editando_unidade")
+                    st.rerun()
+                else:
+                    st.error("Erro ao atualizar unidade.")
