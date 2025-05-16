@@ -60,7 +60,7 @@ def exibir_tela_cadastro_usuario() -> None:
         return
 
     # NOTA: Hash de senha será implementado futuramente.
-    sucesso, msg = model_usuario.criar_usuario(
+    sucesso = model_usuario.criar_usuario(
         nome=nome.strip(),
         data_nascimento=str(nascimento),
         funcao=funcao.strip(),
@@ -73,4 +73,4 @@ def exibir_tela_cadastro_usuario() -> None:
         st.success("Usuário cadastrado com sucesso!")
         st.toast("Novo usuário criado ✅", icon="🎉")
     else:
-        st.error(msg or "Erro ao cadastrar usuário. Verifique se o nome de usuário já existe.")
+        st.error("Erro ao cadastrar usuário. Verifique se o nome de usuário já existe.")
