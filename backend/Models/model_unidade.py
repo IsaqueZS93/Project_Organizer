@@ -136,6 +136,10 @@ def criar_unidade(
                 (cod_unidade, numero_contrato, nome_unidade, estado, cidade, localizacao, pasta_unidade_id),
             )
             db.marca_sujo()
+        
+        # Salva o banco no Drive após a inserção e fora do bloco with
+        caminho_banco = Path(gettempdir()) / db.DB_NAME
+        db.salvar_banco_no_drive(caminho_banco)
         return True
     except sqlite3.IntegrityError:
         logger.warning("Código de unidade duplicado: %s", cod_unidade)

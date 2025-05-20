@@ -58,6 +58,8 @@ def exibir_tela_cadastro_unidade():
                 )
 
                 if sucesso:
-                    st.success("Unidade cadastrada e pasta criada no Drive com sucesso!")
+                    st.success("Unidade cadastrada com sucesso!")
+                    st.info("Aguarde enquanto o banco de dados é atualizado no Google Drive...")
+                    st.rerun()
                 else:
                     st.error("Erro ao cadastrar unidade. Verifique se o código já está em uso.")
