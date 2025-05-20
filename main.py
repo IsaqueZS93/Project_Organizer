@@ -6,9 +6,18 @@ import sys
 import json
 from pathlib import Path
 from dotenv import load_dotenv
-from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
-import atexit
+
+# ────── Ajusta sys.path para importar os módulos corretamente ──────
+ROOT = Path(__file__).resolve().parent
+sys.path.append(str(ROOT))  # backend
+sys.path.append(str(ROOT / "frontend"))  # frontend
+sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
+
+# Agora importa os módulos do backend
 from backend.Database import db_gestaodecontratos as db
+from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
+
+# Importa módulos do frontend
 from frontend.Screens.Screen_Login import login, logout
 from frontend.Utils.auth import verificar_permissao_admin
 
@@ -16,12 +25,6 @@ from frontend.Utils.auth import verificar_permissao_admin
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ────── Ajusta sys.path para importar os módulos corretamente ──────
-ROOT = Path(__file__).resolve().parent
-sys.path.append(str(ROOT))  # backend
-sys.path.append(str(ROOT / "frontend"))  # frontend
-sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
 
 # ────── Configura variáveis do Google Drive ──────
 def configurar_variaveis_drive():
