@@ -9,18 +9,25 @@ from dotenv import load_dotenv
 
 # ────── Ajusta sys.path para importar os módulos corretamente ──────
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))  # Adiciona o diretório raiz primeiro
-sys.path.insert(0, str(ROOT / "backend"))  # Adiciona o diretório backend
-sys.path.insert(0, str(ROOT / "frontend"))  # Adiciona o diretório frontend
-sys.path.insert(0, str(ROOT / "frontend" / "Styles"))  # Adiciona o diretório de estilos
+BACKEND_PATH = ROOT / "backend"
+FRONTEND_PATH = ROOT / "frontend"
+STYLES_PATH = FRONTEND_PATH / "Styles"
+
+# Adiciona os diretórios ao PYTHONPATH
+os.environ["PYTHONPATH"] = f"{BACKEND_PATH}{os.pathsep}{FRONTEND_PATH}{os.pathsep}{STYLES_PATH}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
+
+# Adiciona os diretórios ao sys.path
+sys.path.insert(0, str(BACKEND_PATH))
+sys.path.insert(0, str(FRONTEND_PATH))
+sys.path.insert(0, str(STYLES_PATH))
 
 # Agora importa os módulos do backend
-from Database import db_gestaodecontratos as db
-from Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
+from backend.Database import db_gestaodecontratos as db
+from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
 
 # Importa módulos do frontend
-from Screens.Screen_Login import login, logout
-from Utils.auth import verificar_permissao_admin
+from frontend.Screens.Screen_Login import login, logout
+from frontend.Utils.auth import verificar_permissao_admin
 
 # Configuração de logging
 import logging
