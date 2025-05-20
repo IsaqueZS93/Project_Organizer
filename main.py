@@ -9,17 +9,18 @@ from dotenv import load_dotenv
 
 # ────── Ajusta sys.path para importar os módulos corretamente ──────
 ROOT = Path(__file__).resolve().parent
-sys.path.append(str(ROOT))  # backend
-sys.path.append(str(ROOT / "frontend"))  # frontend
-sys.path.append(str(ROOT / "frontend" / "Styles"))  # estilos
+sys.path.insert(0, str(ROOT))  # Adiciona o diretório raiz primeiro
+sys.path.insert(0, str(ROOT / "backend"))  # Adiciona o diretório backend
+sys.path.insert(0, str(ROOT / "frontend"))  # Adiciona o diretório frontend
+sys.path.insert(0, str(ROOT / "frontend" / "Styles"))  # Adiciona o diretório de estilos
 
 # Agora importa os módulos do backend
-from backend.Database import db_gestaodecontratos as db
-from backend.Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
+from Database import db_gestaodecontratos as db
+from Database.db_gestaodecontratos import atualizar_banco, fechar_conexao
 
 # Importa módulos do frontend
-from frontend.Screens.Screen_Login import login, logout
-from frontend.Utils.auth import verificar_permissao_admin
+from Screens.Screen_Login import login, logout
+from Utils.auth import verificar_permissao_admin
 
 # Configuração de logging
 import logging
