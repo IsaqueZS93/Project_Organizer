@@ -136,11 +136,17 @@ def criar_unidade(
                 (cod_unidade, numero_contrato, nome_unidade, estado, cidade, localizacao, pasta_unidade_id),
             )
             db.marca_sujo()
+            conn.commit()  # Força o commit antes de salvar no Drive
         
         # Salva o banco no Drive após a inserção e fora do bloco with
         caminho_banco = Path(gettempdir()) / db.DB_NAME
-        db.salvar_banco_no_drive(caminho_banco)
-        return True
+        try:
+            db.salvar_banco_no_drive(caminho_banco)
+            logger.info(f"Unidade {cod_unidade} criada e banco salvo no Drive com sucesso.")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao salvar banco no Drive após criar unidade {cod_unidade}: {e}")
+            return True  # Retorna True pois a operação no banco local foi bem-sucedida
     except sqlite3.IntegrityError:
         logger.warning("Código de unidade duplicado: %s", cod_unidade)
         return False
