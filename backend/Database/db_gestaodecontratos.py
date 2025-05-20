@@ -29,6 +29,7 @@ DB_PATH = Path(tempfile.gettempdir()) / DB_NAME
 # Remover cache de conexão por thread
 # _thread_local = threading.local()  # Removido
 
+# Declaração global da variável db_dirty
 db_dirty = False  # Flag global para indicar se o banco está "sujo"
 
 def marca_sujo() -> None:
@@ -275,6 +276,7 @@ def inicializar_tabelas(conn: sqlite3.Connection):
 # ───────────────── Salvar Banco de Dados no Google Drive ─────────────────
 def salvar_banco_no_drive(caminho_banco: Path):
     """Salva o banco de dados local no Google Drive se estiver marcado como 'dirty' e não houver conflitos."""
+    global db_dirty
     st.session_state.setdefault("last_remote_ts", 0.0)
 
     if not db_dirty:
@@ -314,7 +316,6 @@ def salvar_banco_no_drive(caminho_banco: Path):
             st.session_state["last_remote_ts"] = new_remote_ts
             logger.info(f"Timestamp remoto atualizado para: {new_remote_ts}")
             # Reseta a flag dirty após salvar com sucesso
-            global db_dirty
             db_dirty = False
         else:
             st.session_state["last_remote_ts"] = time.time()
