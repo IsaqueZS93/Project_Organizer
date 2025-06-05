@@ -97,8 +97,8 @@ def exibir_conteudo_pasta(folder_id: str):
         items = gdrive.list_files_in_folder(folder_id)
         
         # Separa pastas e arquivos
-        pastas = [item for item in items if item['mimeType'] == 'application/vnd.google-apps.folder']
-        arquivos = [item for item in items if item['mimeType'] != 'application/vnd.google-apps.folder']
+        pastas = [item for item in items if item.get('mimeType') == 'application/vnd.google-apps.folder']
+        arquivos = [item for item in items if item.get('mimeType') != 'application/vnd.google-apps.folder']
         
         # Exibe pastas em grade
         if pastas:
