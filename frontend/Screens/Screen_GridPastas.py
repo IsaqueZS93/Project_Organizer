@@ -165,7 +165,7 @@ def exibir_conteudo_pasta(folder_id: str):
                         def listar_pastas_recursivamente(pasta_id, nivel=0):
                             items = gdrive.list_files_in_folder(pasta_id)
                             for item in items:
-                                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                                if item['mimeType', ''] == 'application/vnd.google-apps.folder':
                                     todas_pastas.append({
                                         'id': item['id'],
                                         'nome': '  ' * nivel + '📁 ' + item['name']
