@@ -264,13 +264,13 @@ def exibir_tela_grid_pastas():
     
     with col1:
         st.metric("Total de Pastas", len([f for f in gdrive.list_files_in_folder(st.session_state['current_folder']) 
-                                        if f['mimeType'] == 'application/vnd.google-apps.folder']))
+                                        if f.get('mimeType') == 'application/vnd.google-apps.folder']))
     
     with col2:
         st.metric("Total de Arquivos", len([f for f in gdrive.list_files_in_folder(st.session_state['current_folder']) 
-                                          if f['mimeType'] != 'application/vnd.google-apps.folder']))
+                                          if f.get('mimeType') != 'application/vnd.google-apps.folder']))
     
     with col3:
         total_size = sum(int(f.get('size', 0)) for f in gdrive.list_files_in_folder(st.session_state['current_folder']) 
-                        if f['mimeType'] != 'application/vnd.google-apps.folder')
+                        if f.get('mimeType') != 'application/vnd.google-apps.folder')
         st.metric("Tamanho Total", f"{total_size / 1024 / 1024:.2f} MB")
